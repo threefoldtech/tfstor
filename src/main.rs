@@ -13,7 +13,8 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, TextEncoder};
 use structopt::StructOpt;
-// use tracing::{debug, info};
+use tracing::{error, info, Level};
+use tracing_subscriber::FmtSubscriber;
 
 #[derive(StructOpt)]
 struct Args {
@@ -42,25 +43,19 @@ struct Args {
     secret_key: Option<String>,
 }
 
-// pub fn setup_tracing() {
-//     use tracing_error::ErrorLayer;
-//     use tracing_subscriber::layer::SubscriberExt;
-//     use tracing_subscriber::util::SubscriberInitExt;
-//     use tracing_subscriber::{fmt, EnvFilter};
-//
-//     tracing_subscriber::fmt()
-//         .event_format(fmt::format::Format::default().pretty())
-//         .with_env_filter(EnvFilter::from_default_env())
-//         .with_timer(fmt::time::ChronoLocal::rfc3339())
-//         .finish()
-//         .with(ErrorLayer::default())
-//         .init();
-// }
+pub fn setup_tracing() {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    // setup_tracing();
+
+    setup_tracing();
 
     let args: Args = Args::from_args();
 
@@ -114,14 +109,14 @@ async fn main() -> Result<()> {
         Server::from_tcp(listener)?.serve(make_service)
     };
 
-    println!("server is running at http://{}:{}/", args.host, args.port);
-    println!(
+    info!("server is running at http://{}:{}/", args.host, args.port);
+    info!(
         "metric server is running at http://{}:{}",
         args.metric_host, args.metric_port
     );
 
     if let Err(e) = try_join!(metric_server, server) {
-        eprintln!("Server failed: {}", e);
+        error!("Server failed: {}", e);
     }
 
     Ok(())

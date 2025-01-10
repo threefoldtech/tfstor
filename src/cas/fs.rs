@@ -45,6 +45,7 @@ use std::{
     ops::Deref,
     path::PathBuf,
 };
+use tracing::info;
 use uuid::Uuid;
 
 pub const BLOCK_SIZE: usize = 1 << 20; // Supposedly 1 MiB
@@ -162,10 +163,13 @@ impl CasFS {
 
     /// Delete an object from a bucket.
     async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), sled::Error> {
+        info!("Deleting object {}", object);
+
         #[cfg(not(feature = "refcount"))]
         {
             self.bucket(bucket)?.remove(object).map(|_| ())
         }
+
         #[cfg(feature = "refcount")]
         {
             // Remove an object. This fetches the object, decrements the refcount of all blocks,
@@ -640,9 +644,10 @@ impl S3Storage for CasFS {
         if !trace_try!(self.bucket_exists(&input.bucket)) {
             return Err(code_error!(NoSuchBucket, "Bucket does not exist").into());
         }
+        info!("DELETE OBJECTS: {:?}", input);
 
         let mut deleted = Vec::with_capacity(input.delete.objects.len());
-        let mut errors = Vec::new();
+        let errors = Vec::new();
 
         for object in input.delete.objects {
             match self.delete_object(&input.bucket, &object.key).await {
@@ -654,8 +659,8 @@ impl S3Storage for CasFS {
                 }
                 Err(e) => {
                     eprintln!(
-                        "Could not remove key {} from bucket {}",
-                        &object.key, &input.bucket
+                        "Could not remove key {} from bucket {}, error: {}",
+                        &object.key, &input.bucket, e
                     );
                     // TODO
                     // errors.push(code_error!(InternalError, "Could not delete key"));
@@ -959,6 +964,7 @@ impl S3Storage for CasFS {
         &self,
         input: PutObjectRequest,
     ) -> S3StorageResult<PutObjectOutput, s3_server::dto::PutObjectError> {
+        info!("PUT object {:?}", input);
         if let Some(ref storage_class) = input.storage_class {
             let is_valid = ["STANDARD", "REDUCED_REDUNDANCY"].contains(&storage_class.as_str());
             if !is_valid {
