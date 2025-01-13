@@ -5,10 +5,10 @@ has been running in production for 1.5 years storing some 250M objects.
 
 ## Building
 
-To build it yourself, clone the repo and then use the standard rust tools. To build the server, the
-`binary` feature is needed. There is also an optional `refcount` feature which adds reference counting
-to data blocks. If this feature is not enabled, data blocks will never be deleted (even if they) aren't
-used anymore. The `vendored` feature can be used if a static binary is needed.
+To build it yourself, clone the repo and then use the standard rust tools.
+There is also an optional `refcount` feature which adds reference counting to data blocks.
+If this feature is not enabled, data blocks will never be deleted (even if they) aren't used anymore.
+The `vendored` feature can be used if a static binary is needed.
 
 ```
 git clone https://github.com/leesmet/s3-cas

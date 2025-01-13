@@ -32,7 +32,7 @@ jobs:
         override: true
 
     - name: Build
-      run: cargo build --features binary,refcount --verbose
+      run: cargo build --features refcount
 
     - name: Run tests
-      run: cargo test  --features binary,refcount --verbose
+      run: cargo test  --features refcount
