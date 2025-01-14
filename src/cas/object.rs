@@ -5,7 +5,11 @@ use super::{
 };
 use chrono::{SecondsFormat, TimeZone, Utc};
 use faster_hex::hex_string;
-use std::convert::{TryFrom, TryInto};
+use std::{
+    convert::{TryFrom, TryInto},
+    time::SystemTime,
+    time::UNIX_EPOCH,
+};
 
 #[derive(Debug)]
 pub struct Object {
@@ -54,8 +58,13 @@ impl Object {
         &self.blocks
     }
 
+    pub fn last_modified(&self) -> SystemTime {
+        UNIX_EPOCH + std::time::Duration::from_secs(self.ctime as u64)
+    }
+
     pub fn format_ctime(&self) -> String {
-        Utc.timestamp(self.ctime, 0)
+        Utc.timestamp_opt(self.ctime, 0)
+            .unwrap()
             .to_rfc3339_opts(SecondsFormat::Secs, true)
     }
 }

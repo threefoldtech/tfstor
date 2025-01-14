@@ -82,6 +82,18 @@ macro_rules! trace_try {
     };
 }
 
+macro_rules! try_ {
+    ($result:expr) => {
+        match $result {
+            Ok(val) => val,
+            Err(err) => {
+                //$crate::error::log(&err);
+                return Err(::s3s::S3Error::internal_error(err));
+            }
+        }
+    };
+}
+
 /// Create a `S3Error` with code and message
 macro_rules! code_error {
     ($code:ident, $msg:expr $(, $source:expr)?) => {

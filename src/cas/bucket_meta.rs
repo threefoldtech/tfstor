@@ -27,7 +27,8 @@ impl From<BucketMeta> for Bucket {
     fn from(bm: BucketMeta) -> Self {
         Bucket {
             creation_date: Some(
-                Utc.timestamp(bm.ctime, 0)
+                Utc.timestamp_opt(bm.ctime, 0)
+                    .unwrap()
                     .to_rfc3339_opts(SecondsFormat::Secs, true),
             ),
             name: Some(bm.name),

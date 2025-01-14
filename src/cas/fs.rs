@@ -112,7 +112,7 @@ impl CasFS {
     }
 
     /// Open the tree containing the block map.
-    fn block_tree(&self) -> Result<sled::Tree, sled::Error> {
+    pub fn block_tree(&self) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(BLOCK_TREE)
     }
 
@@ -127,17 +127,17 @@ impl CasFS {
     }
 
     /// Check if a bucket with a given name exists.
-    fn bucket_exists(&self, bucket_name: &str) -> Result<bool, sled::Error> {
+    pub fn bucket_exists(&self, bucket_name: &str) -> Result<bool, sled::Error> {
         self.bucket_meta_tree()?.contains_key(bucket_name)
     }
 
     /// Open the tree containing the objects in a bucket.
-    fn bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
+    pub fn bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(bucket_name)
     }
 
     /// Open the tree containing the bucket metadata.
-    fn bucket_meta_tree(&self) -> Result<sled::Tree, sled::Error> {
+    pub fn bucket_meta_tree(&self) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(BUCKET_META_TREE)
     }
 
@@ -268,7 +268,7 @@ impl CasFS {
 
     /// Save data on the filesystem. A list of block ID's used as keys for the data blocks is
     /// returned, along with the hash of the full byte stream, and the length of the stream.
-    async fn store_bytes(&self, data: ByteStream) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
+    pub async fn store_bytes(&self, data: ByteStream) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
         let block_map = self.block_tree()?;
         let path_map = self.path_tree()?;
         let (tx, rx) = unbounded();

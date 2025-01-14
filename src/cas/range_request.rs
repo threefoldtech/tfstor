@@ -13,6 +13,10 @@ pub enum RangeRequest {
 }
 
 impl RangeRequest {
+    pub fn new_range(start: u64, end: u64) -> Self {
+        RangeRequest::Range(start, end)
+    }
+
     pub fn size(&self, file_size: u64) -> u64 {
         let (start, end) = match self {
             RangeRequest::All => (0, file_size - 1),

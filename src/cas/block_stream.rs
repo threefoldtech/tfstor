@@ -20,7 +20,8 @@ pub struct BlockStream {
     has_seeked: bool,
     range: RangeRequest,
     file: Option<async_fs::File>, // current file to read
-    open_fut: Option<Pin<Box<dyn Future<Output = io::Result<async_fs::File>> + Send>>>,
+    open_fut: Option<Pin<Box<dyn Future<Output = io::Result<async_fs::File>> + Send + Sync>>>,
+    //open_fut: Option<Pin<Box<dyn Future<Output = io::Result<File, io::Error>> + Send + Sync>>>,
 }
 
 impl BlockStream {
@@ -43,6 +44,7 @@ impl BlockStream {
         }
     }
 }
+unsafe impl Sync for BlockStream {}
 
 impl Stream for BlockStream {
     type Item = io::Result<Bytes>;
