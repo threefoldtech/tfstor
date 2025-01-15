@@ -21,7 +21,6 @@ pub struct BlockStream {
     range: RangeRequest,
     file: Option<async_fs::File>, // current file to read
     open_fut: Option<Pin<Box<dyn Future<Output = io::Result<async_fs::File>> + Send + Sync>>>,
-    //open_fut: Option<Pin<Box<dyn Future<Output = io::Result<File, io::Error>> + Send + Sync>>>,
 }
 
 impl BlockStream {
@@ -58,7 +57,7 @@ impl Stream for BlockStream {
         };
         let processed = self.processed as u64;
 
-        if processed > end {
+        if processed >= end {
             // we did all we need here, exit. This is here because we can't both return data in the
             // actual read, and indicate the stream is done
             return Poll::Ready(None);

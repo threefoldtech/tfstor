@@ -46,7 +46,7 @@ struct Args {
     nugine: bool,
 }
 
-pub fn setup_tracing() {
+fn setup_tracing() {
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .finish();

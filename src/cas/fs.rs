@@ -143,7 +143,7 @@ impl CasFS {
 
     /// Remove a bucket and its associated metadata.
     // TODO: this is very much not optimal
-    async fn bucket_delete(&self, bucket_name: &str) -> Result<(), sled::Error> {
+    pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), sled::Error> {
         let bmt = self.bucket_meta_tree()?;
         bmt.remove(bucket_name)?;
         #[cfg(feature = "refcount")]
@@ -162,7 +162,7 @@ impl CasFS {
     }
 
     /// Delete an object from a bucket.
-    async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), sled::Error> {
+    pub async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), sled::Error> {
         info!("Deleting object {}", object);
 
         #[cfg(not(feature = "refcount"))]
