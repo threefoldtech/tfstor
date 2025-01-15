@@ -114,7 +114,10 @@ impl S3 for S3FS {
         &self,
         req: S3Request<DeleteObjectInput>,
     ) -> S3Result<S3Response<DeleteObjectOutput>> {
+        info!("DELETE OBJECT: {:?}", req.input);
+
         let DeleteObjectInput { bucket, key, .. } = req.input;
+
         if !try_!(self.casfs.bucket_exists(&bucket)) {
             return Err(s3_error!(NoSuchBucket, "Bucket does not exist").into());
         }

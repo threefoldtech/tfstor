@@ -152,6 +152,11 @@ async fn test_single_object() -> Result<()> {
     {
         delete_object(&c, bucket, key).await?;
         delete_bucket(&c, bucket).await?;
+        let result = delete_object(&c, bucket, key).await;
+        assert!(
+            result.is_err(),
+            "Expected error when deleting non-existent object"
+        );
     }
 
     Ok(())
