@@ -22,8 +22,9 @@ use s3s::dto::{
     DeleteBucketOutput, DeleteObjectInput, DeleteObjectOutput, DeleteObjectsInput,
     DeleteObjectsOutput, DeletedObject, GetBucketLocationInput, GetBucketLocationOutput,
     GetObjectInput, GetObjectOutput, HeadBucketInput, HeadBucketOutput, HeadObjectInput,
-    HeadObjectOutput, ListBucketsInput, ListBucketsOutput, ListObjectsV2Input, ListObjectsV2Output,
-    PutObjectInput, PutObjectOutput, UploadPartInput, UploadPartOutput,
+    HeadObjectOutput, ListBucketsInput, ListBucketsOutput, ListObjectsInput, ListObjectsOutput,
+    ListObjectsV2Input, ListObjectsV2Output, PutObjectInput, PutObjectOutput, UploadPartInput,
+    UploadPartOutput,
 };
 use s3s::s3_error;
 use s3s::S3Result;
@@ -424,6 +425,83 @@ impl S3 for S3FS {
         let output = ListBucketsOutput {
             buckets: Some(buckets),
             owner: None,
+            ..Default::default()
+        };
+        Ok(S3Response::new(output))
+    }
+
+    async fn list_objects(
+        &self,
+        req: S3Request<ListObjectsInput>,
+    ) -> S3Result<S3Response<ListObjectsOutput>> {
+        let ListObjectsInput {
+            bucket,
+            delimiter,
+            prefix,
+            encoding_type,
+            marker,
+            max_keys,
+            ..
+        } = req.input;
+
+        let key_count = max_keys
+            .map(|mk| if mk > MAX_KEYS { MAX_KEYS } else { mk })
+            .unwrap_or(MAX_KEYS);
+
+        let b = try_!(self.casfs.bucket(&bucket));
+
+        let start_bytes = if let Some(ref marker) = marker {
+            marker.as_bytes()
+        } else if let Some(ref prefix) = prefix {
+            prefix.as_bytes()
+        } else {
+            &[]
+        };
+        let prefix_bytes = prefix.as_deref().or(Some("")).unwrap().as_bytes();
+
+        let mut objects = b
+            .range(start_bytes..)
+            .filter_map(|read_result| match read_result {
+                Err(_) => None,
+                Ok((k, v)) => Some((k, v)),
+            })
+            .take_while(|(raw_key, _)| raw_key.starts_with(prefix_bytes))
+            .map(|(raw_key, raw_value)| {
+                // SAFETY: we only insert valid utf8 strings
+                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
+                // unwrap is fine as it would mean either a coding error or a corrupt DB
+                let obj = Object::try_from(&*raw_value).unwrap();
+
+                s3s::dto::Object {
+                    key: Some(key),
+                    e_tag: Some(obj.format_e_tag()),
+                    last_modified: Some(obj.last_modified().into()),
+                    owner: None,
+                    size: Some(obj.size() as i64),
+                    storage_class: None,
+                    ..Default::default()
+                }
+            })
+            .take((key_count + 1) as usize)
+            .collect::<Vec<_>>();
+
+        let mut next_marker = None;
+        let truncated = objects.len() == key_count as usize + 1;
+        if truncated {
+            next_marker = Some(objects.pop().unwrap().key.unwrap())
+        }
+
+        let output = ListObjectsOutput {
+            contents: Some(objects),
+            delimiter,
+            encoding_type,
+            name: Some(bucket),
+            //common_prefixes: None,
+            is_truncated: Some(truncated),
+            next_marker: if marker.is_some() { next_marker } else { None },
+            marker,
+            max_keys: Some(key_count),
+            prefix,
             ..Default::default()
         };
         Ok(S3Response::new(output))

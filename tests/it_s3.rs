@@ -235,23 +235,47 @@ async fn test_list_objects_v2() -> Result<()> {
             .await?;
     }
 
-    let result = c
-        .list_objects_v2()
-        .bucket(bucket_str)
-        .prefix(test_prefix)
-        .send()
-        .await;
+    {
+        // list objects v1
+        let result = c
+            .list_objects()
+            .bucket(bucket_str)
+            .prefix(test_prefix)
+            .send()
+            .await;
 
-    let response = log_and_unwrap!(result);
+        let response = log_and_unwrap!(result);
 
-    let contents: Vec<_> = response
-        .contents()
-        .iter()
-        .filter_map(|obj| obj.key())
-        .collect();
-    assert!(!contents.is_empty());
-    assert!(contents.contains(&key1));
-    assert!(contents.contains(&key2));
+        let contents: Vec<_> = response
+            .contents()
+            .iter()
+            .filter_map(|obj| obj.key())
+            .collect();
+        assert!(!contents.is_empty());
+        assert!(contents.contains(&key1));
+        assert!(contents.contains(&key2));
+    }
+
+    {
+        // list objects v2
+        let result = c
+            .list_objects_v2()
+            .bucket(bucket_str)
+            .prefix(test_prefix)
+            .send()
+            .await;
+
+        let response = log_and_unwrap!(result);
+
+        let contents: Vec<_> = response
+            .contents()
+            .iter()
+            .filter_map(|obj| obj.key())
+            .collect();
+        assert!(!contents.is_empty());
+        assert!(contents.contains(&key1));
+        assert!(contents.contains(&key2));
+    }
 
     Ok(())
 }
