@@ -17,14 +17,14 @@ use s3_server::dto::ByteStream;
 use s3s::dto::StreamingBlob;
 use s3s::dto::Timestamp;
 use s3s::dto::{
-    Bucket, CompleteMultipartUploadInput, CompleteMultipartUploadOutput, CreateBucketInput,
-    CreateBucketOutput, CreateMultipartUploadInput, CreateMultipartUploadOutput, DeleteBucketInput,
-    DeleteBucketOutput, DeleteObjectInput, DeleteObjectOutput, DeleteObjectsInput,
-    DeleteObjectsOutput, DeletedObject, GetBucketLocationInput, GetBucketLocationOutput,
-    GetObjectInput, GetObjectOutput, HeadBucketInput, HeadBucketOutput, HeadObjectInput,
-    HeadObjectOutput, ListBucketsInput, ListBucketsOutput, ListObjectsInput, ListObjectsOutput,
-    ListObjectsV2Input, ListObjectsV2Output, PutObjectInput, PutObjectOutput, UploadPartInput,
-    UploadPartOutput,
+    Bucket, CompleteMultipartUploadInput, CompleteMultipartUploadOutput, CopyObjectInput,
+    CopyObjectOutput, CopyObjectResult, CopySource, CreateBucketInput, CreateBucketOutput,
+    CreateMultipartUploadInput, CreateMultipartUploadOutput, DeleteBucketInput, DeleteBucketOutput,
+    DeleteObjectInput, DeleteObjectOutput, DeleteObjectsInput, DeleteObjectsOutput, DeletedObject,
+    GetBucketLocationInput, GetBucketLocationOutput, GetObjectInput, GetObjectOutput,
+    HeadBucketInput, HeadBucketOutput, HeadObjectInput, HeadObjectOutput, ListBucketsInput,
+    ListBucketsOutput, ListObjectsInput, ListObjectsOutput, ListObjectsV2Input,
+    ListObjectsV2Output, PutObjectInput, PutObjectOutput, UploadPartInput, UploadPartOutput,
 };
 use s3s::s3_error;
 use s3s::S3Result;
@@ -167,6 +167,50 @@ impl S3 for S3FS {
             bucket: Some(bucket),
             key: Some(key),
             e_tag: Some(object.format_e_tag()),
+            ..Default::default()
+        };
+        Ok(S3Response::new(output))
+    }
+
+    async fn copy_object(
+        &self,
+        req: S3Request<CopyObjectInput>,
+    ) -> S3Result<S3Response<CopyObjectOutput>> {
+        let input = req.input;
+        let (bucket, key) = match input.copy_source {
+            CopySource::AccessPoint { .. } => return Err(s3_error!(NotImplemented)),
+            CopySource::Bucket {
+                ref bucket,
+                ref key,
+                ..
+            } => (bucket, key),
+        };
+
+        if !try_!(self.casfs.bucket_exists(bucket)) {
+            return Err(s3_error!(NoSuchBucket, "Target bucket does not exist").into());
+        }
+
+        let source_bk = try_!(self.casfs.bucket(&input.bucket));
+        let mut obj_meta = match try_!(source_bk.get(&input.key)) {
+            // unwrap here is safe as it means the DB is corrupted
+            Some(enc_meta) => Object::try_from(&*enc_meta).unwrap(),
+            None => return Err(s3_error!(NoSuchKey, "Source key does not exist").into()),
+        };
+
+        obj_meta.touch();
+
+        // TODO: check duplicate?
+        let dst_bk = try_!(self.casfs.bucket(bucket));
+        try_!(dst_bk.insert(key.as_bytes(), Vec::<u8>::from(&obj_meta)));
+
+        let copy_object_result = CopyObjectResult {
+            e_tag: Some(obj_meta.format_e_tag()),
+            last_modified: Some(obj_meta.last_modified().into()),
+            ..Default::default()
+        };
+
+        let output = CopyObjectOutput {
+            copy_object_result: Some(copy_object_result),
             ..Default::default()
         };
         Ok(S3Response::new(output))
