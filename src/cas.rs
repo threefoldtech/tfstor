@@ -4,7 +4,7 @@ pub mod bucket_meta;
 mod buffered_byte_stream;
 mod errors;
 mod fs;
-mod multipart;
+pub mod multipart;
 pub mod object;
 pub mod range_request;
 

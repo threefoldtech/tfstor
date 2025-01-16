@@ -25,7 +25,7 @@ const S3_API_METHODS: &[&str] = &[
     "upload_part",
 ];
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SharedMetrics {
     metrics: Arc<Metrics>,
 }
@@ -51,7 +51,7 @@ impl Deref for SharedMetrics {
         &self.metrics
     }
 }
-
+#[derive(Debug)]
 pub struct Metrics {
     method_calls: IntCounterVec,
     bucket_count: IntGauge,
