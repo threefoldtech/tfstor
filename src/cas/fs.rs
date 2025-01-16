@@ -2,16 +2,12 @@ use crate::metrics::SharedMetrics;
 
 use super::{
     block::{Block, BlockID, BLOCKID_SIZE},
-    block_stream::BlockStream,
     bucket_meta::BucketMeta,
     buffered_byte_stream::BufferedByteStream,
-    multipart::MultiPart,
     object::Object,
-    range_request::parse_range_request,
 };
 use async_trait::async_trait;
-use chrono::prelude::*;
-use faster_hex::{hex_decode, hex_string};
+use faster_hex::hex_string;
 use futures::{
     channel::mpsc::unbounded,
     sink::SinkExt,
@@ -21,8 +17,8 @@ use futures::{
 use md5::{Digest, Md5};
 use s3_server::dto::{
     CopyObjectOutput, CopyObjectRequest, CopyObjectResult, DeleteBucketOutput, DeleteBucketRequest,
-    DeleteObjectOutput, DeleteObjectRequest, DeleteObjectsOutput, DeleteObjectsRequest,
-    DeletedObject, PutObjectOutput, PutObjectRequest,
+    DeleteObjectOutput, DeleteObjectRequest, DeleteObjectsRequest, PutObjectOutput,
+    PutObjectRequest,
 };
 use s3_server::{
     dto::{
@@ -42,11 +38,9 @@ use sled::{Db, Transactional};
 use std::{
     convert::{TryFrom, TryInto},
     io, mem,
-    ops::Deref,
     path::PathBuf,
 };
 use tracing::info;
-use uuid::Uuid;
 
 pub const BLOCK_SIZE: usize = 1 << 20; // Supposedly 1 MiB
 const BUCKET_META_TREE: &str = "_BUCKETS";
@@ -433,95 +427,10 @@ impl CasFS {
 impl S3Storage for CasFS {
     async fn complete_multipart_upload(
         &self,
-        input: CompleteMultipartUploadRequest,
+        _input: CompleteMultipartUploadRequest,
     ) -> S3StorageResult<CompleteMultipartUploadOutput, s3_server::dto::CompleteMultipartUploadError>
     {
-        let CompleteMultipartUploadRequest {
-            multipart_upload,
-            bucket,
-            key,
-            upload_id,
-            ..
-        } = input;
-
-        let multipart_upload = if let Some(multipart_upload) = multipart_upload {
-            multipart_upload
-        } else {
-            let err = code_error!(InvalidPart, "Missing multipart_upload");
-            return Err(err.into());
-        };
-
-        let multipart_map = trace_try!(self.multipart_tree());
-
-        let mut blocks = vec![];
-        let mut cnt: i64 = 0;
-        for part in multipart_upload.parts.iter().flatten() {
-            let part_number = trace_try!(part
-                .part_number
-                .ok_or_else(|| { io::Error::new(io::ErrorKind::NotFound, "Missing part_number") }));
-            cnt = cnt.wrapping_add(1);
-            if part_number != cnt {
-                trace_try!(Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "InvalidPartOrder"
-                )));
-            }
-            let part_key = format!("{}-{}-{}-{}", &bucket, &key, &upload_id, part_number);
-            let part_data_enc = trace_try!(multipart_map.get(&part_key));
-            let part_data_enc = match part_data_enc {
-                Some(pde) => pde,
-                None => {
-                    eprintln!("Missing part \"{}\" in multipart upload", part_key);
-                    return Err(code_error!(InvalidArgument, "Part not uploaded").into());
-                }
-            };
-
-            // unwrap here is safe as it is a coding error
-            let mp = MultiPart::try_from(&*part_data_enc).expect("Corrupted multipart data");
-
-            blocks.extend_from_slice(mp.blocks());
-        }
-
-        // Compute the e_tag of the multpart upload. Per the S3 standard (according to minio), the
-        // e_tag of a multipart uploaded object is the Md5 of the Md5 of the parts.
-        let mut hasher = Md5::new();
-        let mut size = 0;
-        let block_map = trace_try!(self.block_tree());
-        for block in &blocks {
-            let bi = trace_try!(block_map.get(&block)).unwrap(); // unwrap is fine as all blocks in must be present
-            let block_info = Block::try_from(&*bi).expect("Block data is corrupt");
-            size += block_info.size();
-            hasher.update(&block);
-        }
-        let e_tag = hasher.finalize().into();
-
-        let bc = trace_try!(self.bucket(&bucket));
-
-        let object = Object::new(size as u64, e_tag, cnt as usize, blocks);
-
-        trace_try!(bc.insert(&key, Vec::<u8>::from(&object)));
-
-        // Try to delete the multipart metadata. If this fails, it is not really an issue.
-        for part in multipart_upload.parts.into_iter().flatten() {
-            let part_key = format!(
-                "{}-{}-{}-{}",
-                &bucket,
-                &key,
-                &upload_id,
-                part.part_number.unwrap()
-            );
-
-            if let Err(e) = multipart_map.remove(part_key) {
-                eprintln!("Could not remove part: {}", e);
-            };
-        }
-
-        Ok(CompleteMultipartUploadOutput {
-            bucket: Some(bucket),
-            key: Some(key),
-            e_tag: Some(object.format_e_tag()),
-            ..CompleteMultipartUploadOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn copy_object(
@@ -566,225 +475,76 @@ impl S3Storage for CasFS {
 
     async fn create_multipart_upload(
         &self,
-        input: CreateMultipartUploadRequest,
+        _input: CreateMultipartUploadRequest,
     ) -> S3StorageResult<CreateMultipartUploadOutput, s3_server::dto::CreateMultipartUploadError>
     {
-        let CreateMultipartUploadRequest { bucket, key, .. } = input;
-
-        let upload_id = Uuid::new_v4().to_string();
-
-        Ok(CreateMultipartUploadOutput {
-            bucket: Some(bucket),
-            key: Some(key),
-            upload_id: Some(upload_id),
-            ..CreateMultipartUploadOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn create_bucket(
         &self,
-        input: CreateBucketRequest,
+        _input: CreateBucketRequest,
     ) -> S3StorageResult<CreateBucketOutput, s3_server::dto::CreateBucketError> {
-        let CreateBucketRequest { bucket, .. } = input;
-
-        if trace_try!(self.bucket_exists(&bucket)) {
-            return Err(code_error!(
-                BucketAlreadyExists,
-                "A bucket with this name already exists"
-            )
-            .into());
-        }
-        let bucket_meta = trace_try!(self.bucket_meta_tree());
-
-        let bm = Vec::from(&BucketMeta::new(Utc::now().timestamp(), bucket.clone()));
-
-        trace_try!(bucket_meta.insert(&bucket, bm));
-
-        self.metrics.inc_bucket_count();
-
-        Ok(CreateBucketOutput {
-            ..CreateBucketOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn delete_bucket(
         &self,
-        input: DeleteBucketRequest,
+        _input: DeleteBucketRequest,
     ) -> S3StorageResult<DeleteBucketOutput, s3_server::dto::DeleteBucketError> {
-        let DeleteBucketRequest { bucket, .. } = input;
-
-        trace_try!(self.bucket_delete(&bucket).await);
-
-        self.metrics.dec_bucket_count();
-
-        Ok(DeleteBucketOutput)
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn delete_object(
         &self,
-        input: DeleteObjectRequest,
+        _input: DeleteObjectRequest,
     ) -> S3StorageResult<DeleteObjectOutput, s3_server::dto::DeleteObjectError> {
-        let DeleteObjectRequest { bucket, key, .. } = input;
-
-        if !trace_try!(self.bucket_exists(&bucket)) {
-            return Err(code_error!(NoSuchBucket, "Bucket does not exist").into());
-        }
-
-        trace_try!(self.delete_object(&bucket, &key).await);
-
-        Ok(DeleteObjectOutput::default())
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn delete_objects(
         &self,
-        input: DeleteObjectsRequest,
+        _input: DeleteObjectsRequest,
     ) -> s3_server::errors::S3StorageResult<
         s3_server::dto::DeleteObjectsOutput,
         s3_server::dto::DeleteObjectsError,
     > {
-        if !trace_try!(self.bucket_exists(&input.bucket)) {
-            return Err(code_error!(NoSuchBucket, "Bucket does not exist").into());
-        }
-        info!("DELETE OBJECTS: {:?}", input);
-
-        let mut deleted = Vec::with_capacity(input.delete.objects.len());
-        let errors = Vec::new();
-
-        for object in input.delete.objects {
-            match self.delete_object(&input.bucket, &object.key).await {
-                Ok(_) => {
-                    deleted.push(DeletedObject {
-                        key: Some(object.key),
-                        ..DeletedObject::default()
-                    });
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Could not remove key {} from bucket {}, error: {}",
-                        &object.key, &input.bucket, e
-                    );
-                    // TODO
-                    // errors.push(code_error!(InternalError, "Could not delete key"));
-                }
-            };
-        }
-
-        Ok(DeleteObjectsOutput {
-            deleted: Some(deleted),
-            // TODO: should this just always be set?
-            errors: if errors.is_empty() {
-                None
-            } else {
-                Some(errors)
-            },
-            ..DeleteObjectsOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn get_bucket_location(
         &self,
-        input: GetBucketLocationRequest,
+        _input: GetBucketLocationRequest,
     ) -> S3StorageResult<GetBucketLocationOutput, s3_server::dto::GetBucketLocationError> {
-        let GetBucketLocationRequest { bucket, .. } = input;
-
-        let exists = trace_try!(self.bucket_exists(&bucket));
-
-        if !exists {
-            return Err(code_error!(NoSuchBucket, "NotFound").into());
-        }
-
-        Ok(GetBucketLocationOutput {
-            location_constraint: None,
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn get_object(
         &self,
-        input: GetObjectRequest,
+        _input: GetObjectRequest,
     ) -> S3StorageResult<GetObjectOutput, s3_server::dto::GetObjectError> {
-        let GetObjectRequest {
-            bucket, key, range, ..
-        } = input;
-
-        let range = parse_range_request(&range);
-
-        let bk = trace_try!(self.bucket(&bucket));
-        let obj = match trace_try!(bk.get(&key)) {
-            None => return Err(code_error!(NoSuchKey, "The specified key does not exist").into()),
-            Some(obj) => obj,
-        };
-        let obj_meta = trace_try!(Object::try_from(&obj.to_vec()[..]));
-        let stream_size = range.size(obj_meta.size());
-
-        let e_tag = obj_meta.format_e_tag();
-        let block_map = trace_try!(self.block_tree());
-        let mut paths = Vec::with_capacity(obj_meta.blocks().len());
-        let mut block_size = 0;
-        for block in obj_meta.blocks() {
-            // unwrap here is safe as we only add blocks to the list of an object if they are
-            // corectly inserted in the block map
-            let block_meta_enc = trace_try!(block_map.get(block)).unwrap();
-            let block_meta = trace_try!(Block::try_from(&*block_meta_enc));
-            block_size += block_meta.size();
-            paths.push((block_meta.disk_path(self.root.clone()), block_meta.size()));
-        }
-        debug_assert!(obj_meta.size() as usize == block_size);
-        let block_stream = BlockStream::new(paths, block_size, range, self.metrics.clone());
-
-        // TODO: part count
-        let stream = ByteStream::new_with_size(block_stream, stream_size as usize);
-        Ok(GetObjectOutput {
-            body: Some(stream),
-            content_length: Some(stream_size as i64),
-            last_modified: Some(obj_meta.format_ctime()),
-            e_tag: Some(e_tag),
-            ..GetObjectOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn head_bucket(
         &self,
-        input: HeadBucketRequest,
+        _input: HeadBucketRequest,
     ) -> S3StorageResult<HeadBucketOutput, s3_server::dto::HeadBucketError> {
-        let HeadBucketRequest { bucket, .. } = input;
-
-        if !trace_try!(self.bucket_exists(&bucket)) {
-            return Err(code_error!(NoSuchBucket, "The specified bucket does not exist").into());
-        }
-
-        Ok(HeadBucketOutput)
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn head_object(
         &self,
-        input: HeadObjectRequest,
+        _input: HeadObjectRequest,
     ) -> S3StorageResult<HeadObjectOutput, s3_server::dto::HeadObjectError> {
-        let HeadObjectRequest { bucket, key, .. } = input;
-        let bk = trace_try!(self.bucket(&bucket));
-        let obj = match trace_try!(bk.get(&key)) {
-            None => return Err(code_error!(NoSuchKey, "The specified key does not exist").into()),
-            Some(obj) => obj,
-        };
-        let obj_meta = trace_try!(Object::try_from(&obj.to_vec()[..]));
-
-        Ok(HeadObjectOutput {
-            content_length: Some(obj_meta.size() as i64),
-            last_modified: Some(obj_meta.format_ctime()),
-            e_tag: Some(obj_meta.format_e_tag()),
-            ..HeadObjectOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn list_buckets(
         &self,
         _: ListBucketsRequest,
     ) -> S3StorageResult<ListBucketsOutput, s3_server::dto::ListBucketsError> {
-        let buckets = trace_try!(self.buckets());
-
-        Ok(ListBucketsOutput {
-            buckets: Some(buckets),
-            owner: None,
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn list_objects(
@@ -863,201 +623,22 @@ impl S3Storage for CasFS {
 
     async fn list_objects_v2(
         &self,
-        input: ListObjectsV2Request,
+        _input: ListObjectsV2Request,
     ) -> S3StorageResult<ListObjectsV2Output, s3_server::dto::ListObjectsV2Error> {
-        let ListObjectsV2Request {
-            bucket,
-            delimiter,
-            prefix,
-            encoding_type,
-            start_after,
-            max_keys,
-            continuation_token,
-            ..
-        } = input;
-
-        let b = trace_try!(self.bucket(&bucket));
-
-        let key_count = max_keys
-            .map(|mk| if mk > MAX_KEYS { MAX_KEYS } else { mk })
-            .unwrap_or(MAX_KEYS);
-
-        let token = if let Some(ref rt) = continuation_token {
-            let mut out = vec![0; rt.len() / 2];
-            if hex_decode(rt.as_bytes(), &mut out).is_err() {
-                return Err(
-                    code_error!(InvalidToken, "continuation token has an invalid format").into(),
-                );
-            };
-            match String::from_utf8(out) {
-                Ok(s) => Some(s),
-                Err(_) => {
-                    return Err(code_error!(InvalidToken, "continuation token is invalid").into())
-                }
-            }
-        } else {
-            None
-        };
-
-        let start_bytes = if let Some(ref token) = token {
-            token.as_bytes()
-        } else if let Some(ref prefix) = prefix {
-            prefix.as_bytes()
-        } else if let Some(ref start_after) = start_after {
-            start_after.as_bytes()
-        } else {
-            &[]
-        };
-        let prefix_bytes = prefix.as_deref().or(Some("")).unwrap().as_bytes();
-
-        let mut objects: Vec<_> = b
-            .range(start_bytes..)
-            .filter_map(|read_result| match read_result {
-                Ok((r, k)) => Some((r, k)),
-                Err(_) => None,
-            })
-            .skip_while(|(raw_key, _)| match start_after {
-                None => false,
-                Some(ref start_after) => raw_key.deref() <= start_after.as_bytes(),
-            })
-            .take_while(|(raw_key, _)| raw_key.starts_with(prefix_bytes))
-            .map(|(raw_key, raw_value)| {
-                // SAFETY: we only insert valid utf8 strings
-                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
-                // unwrap is fine as it would mean either a coding error or a corrupt DB
-                let obj = Object::try_from(&*raw_value).unwrap();
-
-                S3Object {
-                    key: Some(key),
-                    e_tag: Some(obj.format_e_tag()),
-                    last_modified: Some(obj.format_ctime()),
-                    owner: None,
-                    size: Some(obj.size() as i64),
-                    storage_class: None,
-                }
-            })
-            .take((key_count + 1) as usize)
-            .collect();
-
-        let mut next_token = None;
-        let truncated = objects.len() == key_count as usize + 1;
-        if truncated {
-            next_token = Some(hex_string(objects.pop().unwrap().key.unwrap().as_bytes()))
-        }
-
-        Ok(ListObjectsV2Output {
-            key_count: Some(objects.len() as i64),
-            contents: Some(objects),
-            common_prefixes: None,
-            delimiter,
-            continuation_token,
-            encoding_type,
-            is_truncated: Some(truncated),
-            prefix,
-            name: Some(bucket),
-            max_keys: Some(key_count),
-            start_after,
-            next_continuation_token: next_token,
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn put_object(
         &self,
-        input: PutObjectRequest,
+        _input: PutObjectRequest,
     ) -> S3StorageResult<PutObjectOutput, s3_server::dto::PutObjectError> {
-        info!("PUT object {:?}", input);
-        if let Some(ref storage_class) = input.storage_class {
-            let is_valid = ["STANDARD", "REDUCED_REDUNDANCY"].contains(&storage_class.as_str());
-            if !is_valid {
-                let err = code_error!(
-                    InvalidStorageClass,
-                    "The storage class you specified is not valid."
-                );
-                return Err(err.into());
-            }
-        }
-
-        let PutObjectRequest {
-            body, bucket, key, ..
-        } = input;
-
-        let body: ByteStream = body.ok_or_else(|| {
-            code_error!(IncompleteBody, "You did not provide the number of bytes specified by the Content-Length HTTP header.")
-        })?;
-
-        if !trace_try!(self.bucket_exists(&bucket)) {
-            return Err(code_error!(NoSuchBucket, "Bucket does not exist").into());
-        }
-
-        let (blocks, hash, size) = trace_try!(self.store_bytes(body).await);
-
-        let obj_meta = Object::new(size, hash, 0, blocks);
-
-        trace_try!(trace_try!(self.bucket(&bucket)).insert(&key, Vec::<u8>::from(&obj_meta)));
-
-        Ok(PutObjectOutput {
-            e_tag: Some(obj_meta.format_e_tag()),
-            ..PutObjectOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 
     async fn upload_part(
         &self,
-        input: UploadPartRequest,
+        _input: UploadPartRequest,
     ) -> S3StorageResult<UploadPartOutput, s3_server::dto::UploadPartError> {
-        let UploadPartRequest {
-            body,
-            bucket,
-            content_length,
-            content_md5: _, // TODO: Verify
-            key,
-            part_number,
-            upload_id,
-            ..
-        } = input;
-
-        let body: ByteStream = body.ok_or_else(|| {
-            code_error!(IncompleteBody, "You did not provide the number of bytes specified by the Content-Length HTTP header.")
-        })?;
-
-        let content_length = content_length.ok_or_else(|| {
-            code_error!(
-                MissingContentLength,
-                "You did not provide the number of bytes in the Content-Length HTTP header."
-            )
-        })?;
-
-        let (blocks, hash, size) = trace_try!(self.store_bytes(body).await);
-
-        if size != content_length as u64 {
-            return Err(code_error!(
-                InvalidRequest,
-                "You did not send the amount of bytes specified by the Content-Length HTTP header."
-            )
-            .into());
-        }
-
-        let mp_map = trace_try!(self.multipart_tree());
-
-        let e_tag = format!("\"{}\"", hex_string(&hash));
-        let storage_key = format!("{}-{}-{}-{}", &bucket, &key, &upload_id, part_number);
-        let mp = MultiPart::new(
-            size as usize,
-            part_number,
-            bucket,
-            key,
-            upload_id,
-            hash,
-            blocks,
-        );
-
-        let enc_mp = Vec::from(&mp);
-
-        trace_try!(mp_map.insert(storage_key, enc_mp));
-
-        Ok(UploadPartOutput {
-            e_tag: Some(e_tag),
-            ..UploadPartOutput::default()
-        })
+        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 }
