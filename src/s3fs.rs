@@ -78,7 +78,6 @@ fn fmt_content_range(start: u64, end_inclusive: u64, size: u64) -> String {
 
 #[async_trait::async_trait]
 impl S3 for S3FS {
-    #[tracing::instrument]
     async fn complete_multipart_upload(
         &self,
         req: S3Request<CompleteMultipartUploadInput>,
@@ -172,7 +171,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn create_bucket(
         &self,
         req: S3Request<CreateBucketInput>,
@@ -205,7 +203,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn create_multipart_upload(
         &self,
         req: S3Request<CreateMultipartUploadInput>,
@@ -224,7 +221,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn delete_bucket(
         &self,
         req: S3Request<DeleteBucketInput>,
@@ -238,7 +234,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(DeleteBucketOutput {}))
     }
 
-    #[tracing::instrument]
     async fn delete_object(
         &self,
         req: S3Request<DeleteObjectInput>,
@@ -258,7 +253,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn delete_objects(
         &self,
         req: S3Request<DeleteObjectsInput>,
@@ -320,7 +314,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn get_object(
         &self,
         req: S3Request<GetObjectInput>,
@@ -378,7 +371,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn head_bucket(
         &self,
         req: S3Request<HeadBucketInput>,
@@ -392,7 +384,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(HeadBucketOutput::default()))
     }
 
-    #[tracing::instrument]
     async fn head_object(
         &self,
         req: S3Request<HeadObjectInput>,
@@ -417,7 +408,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn list_buckets(
         &self,
         _: S3Request<ListBucketsInput>,
@@ -439,11 +429,11 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn list_objects_v2(
         &self,
         req: S3Request<ListObjectsV2Input>,
     ) -> S3Result<S3Response<ListObjectsV2Output>> {
+        info!("LIST OBJECTS V2: {:?}", req.input);
         let ListObjectsV2Input {
             bucket,
             delimiter,
@@ -541,7 +531,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn put_object(
         &self,
         req: S3Request<PutObjectInput>,
@@ -588,7 +577,6 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
-    #[tracing::instrument]
     async fn upload_part(
         &self,
         req: S3Request<UploadPartInput>,
