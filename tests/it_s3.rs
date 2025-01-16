@@ -18,8 +18,8 @@ use aws_sdk_s3::Client;
 
 use aws_sdk_s3::types::BucketLocationConstraint;
 //use aws_sdk_s3::types::ChecksumMode;
-//use aws_sdk_s3::types::CompletedMultipartUpload;
-//use aws_sdk_s3::types::CompletedPart;
+use aws_sdk_s3::types::CompletedMultipartUpload;
+use aws_sdk_s3::types::CompletedPart;
 use aws_sdk_s3::types::CreateBucketConfiguration;
 
 use anyhow::Result;
@@ -27,7 +27,7 @@ use once_cell::sync::Lazy;
 use std::convert::TryInto;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
-use tracing::debug;
+use tracing::{debug, error};
 use uuid::Uuid;
 
 const FS_ROOT: &str = concat!(env!("CARGO_TARGET_TMPDIR"), "/s3s-fs-tests-aws");
@@ -42,6 +42,21 @@ pub fn setup_tracing() {
         .finish();
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+}
+
+macro_rules! log_and_unwrap {
+    ($result:expr) => {
+        match $result {
+            Ok(ans) => {
+                debug!(?ans);
+                ans
+            }
+            Err(err) => {
+                error!(?err);
+                return Err(err.into());
+            }
+        }
+    };
 }
 
 fn config() -> &'static SdkConfig {
@@ -157,6 +172,113 @@ async fn test_single_object() -> Result<()> {
             result.is_err(),
             "Expected error when deleting non-existent object"
         );
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument]
+async fn test_list_buckets() -> Result<()> {
+    let c = Client::new(config());
+    let response1 = log_and_unwrap!(c.list_buckets().send().await);
+    drop(response1);
+
+    let bucket1 = format!("test-list-buckets-1-{}", Uuid::new_v4());
+    let bucket1_str = bucket1.as_str();
+    let bucket2 = format!("test-list-buckets-2-{}", Uuid::new_v4());
+    let bucket2_str = bucket2.as_str();
+
+    create_bucket(&c, bucket1_str).await?;
+    create_bucket(&c, bucket2_str).await?;
+
+    let response2 = log_and_unwrap!(c.list_buckets().send().await);
+    let bucket_names: Vec<_> = response2
+        .buckets()
+        .iter()
+        .filter_map(|bucket| bucket.name())
+        .collect();
+    assert!(bucket_names.contains(&bucket1_str));
+    assert!(bucket_names.contains(&bucket2_str));
+
+    Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument]
+async fn test_multipart() -> Result<()> {
+    let _guard = serial().await;
+
+    let c = Client::new(config());
+
+    let bucket = format!("test-multipart-{}", Uuid::new_v4());
+    let bucket = bucket.as_str();
+    create_bucket(&c, bucket).await?;
+
+    let key = "sample.txt";
+    let content = "abcdefghijklmnopqrstuvwxyz/0123456789/!@#$%^&*();\n";
+
+    let upload_id = {
+        let ans = c
+            .create_multipart_upload()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await?;
+        ans.upload_id.unwrap()
+    };
+    let upload_id = upload_id.as_str();
+
+    let upload_parts = {
+        let body = ByteStream::from_static(content.as_bytes());
+        let part_number = 1;
+
+        let ans = c
+            .upload_part()
+            .bucket(bucket)
+            .key(key)
+            .upload_id(upload_id)
+            .body(body)
+            .part_number(part_number)
+            .send()
+            .await?;
+
+        let part = CompletedPart::builder()
+            .e_tag(ans.e_tag.unwrap_or_default())
+            .part_number(part_number)
+            .build();
+
+        vec![part]
+    };
+
+    {
+        let upload = CompletedMultipartUpload::builder()
+            .set_parts(Some(upload_parts))
+            .build();
+
+        let _ = c
+            .complete_multipart_upload()
+            .bucket(bucket)
+            .key(key)
+            .multipart_upload(upload)
+            .upload_id(upload_id)
+            .send()
+            .await?;
+    }
+
+    {
+        let ans = c.get_object().bucket(bucket).key(key).send().await?;
+
+        let content_length: usize = ans.content_length().unwrap().try_into().unwrap();
+        let body = ans.body.collect().await?.into_bytes();
+
+        assert_eq!(content_length, content.len());
+        assert_eq!(body.as_ref(), content.as_bytes());
+    }
+
+    {
+        delete_object(&c, bucket, key).await?;
+        delete_bucket(&c, bucket).await?;
     }
 
     Ok(())

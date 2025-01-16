@@ -56,6 +56,7 @@ const MULTIPART_TREE: &str = "_MULTIPART_PARTS";
 pub const PTR_SIZE: usize = mem::size_of::<usize>(); // Size of a `usize` in bytes
 const MAX_KEYS: i64 = 1000;
 
+#[derive(Debug)]
 pub struct CasFS {
     db: Db,
     root: PathBuf,
@@ -122,7 +123,7 @@ impl CasFS {
     }
 
     /// Open the tree containing the multipart parts.
-    fn multipart_tree(&self) -> Result<sled::Tree, sled::Error> {
+    pub fn multipart_tree(&self) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(MULTIPART_TREE)
     }
 
@@ -249,7 +250,7 @@ impl CasFS {
     }
 
     /// Get a list of all buckets in the system.
-    fn buckets(&self) -> Result<Vec<Bucket>, sled::Error> {
+    pub fn buckets(&self) -> Result<Vec<Bucket>, sled::Error> {
         Ok(self
             .bucket_meta_tree()?
             .scan_prefix(&[])
