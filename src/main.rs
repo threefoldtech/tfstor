@@ -44,7 +44,7 @@ fn main() -> Result<()> {
 
     let args: Args = Args::from_args();
 
-    return run(args);
+    run(args)
 }
 
 use hyper_util::rt::{TokioExecutor, TokioIo};

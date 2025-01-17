@@ -34,5 +34,9 @@ jobs:
     - name: Build
       run: cargo build --features refcount
 
+    - uses: actions/checkout@v4
+    - name: Run clippy
+      run: cargo clippy --all-features -- -Dwarnings
+
     - name: Run tests
       run: cargo test  --features refcount

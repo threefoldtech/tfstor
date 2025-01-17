@@ -128,7 +128,7 @@ impl CasFS {
             for key in bucket.iter().keys() {
                 self.delete_object(
                     bucket_name,
-                    std::str::from_utf8(&*key?).expect("keys are valid utf-8"),
+                    std::str::from_utf8(&key?).expect("keys are valid utf-8"),
                 )
                 .await?;
             }
@@ -168,7 +168,7 @@ impl CasFS {
                                     // This is technically impossible
                                     None => eprintln!(
                                         "missing block {} in block map",
-                                        hex_string(&*block_id)
+                                        hex_string(block_id)
                                     ),
                                     Some(block_data) => {
                                         let mut block = Block::try_from(&*block_data)
@@ -180,11 +180,11 @@ impl CasFS {
                                         // filled in by another block, before we properly delete the
                                         // path from disk.
                                         if block.rc() == 1 {
-                                            blocks.remove(&*block_id)?;
+                                            blocks.remove(block_id)?;
                                             to_delete.push(block);
                                         } else {
                                             block.decrement_refcount();
-                                            blocks.insert(&*block_id, Vec::from(&block))?;
+                                            blocks.insert(block_id, Vec::from(&block))?;
                                         }
                                     }
                                 }
@@ -228,7 +228,7 @@ impl CasFS {
     pub fn buckets(&self) -> Result<Vec<Bucket>, sled::Error> {
         Ok(self
             .bucket_meta_tree()?
-            .scan_prefix(&[])
+            .scan_prefix([])
             .values()
             .filter_map(|raw_value| {
                 let value = match raw_value {

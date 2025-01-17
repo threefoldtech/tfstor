@@ -95,7 +95,7 @@ impl S3 for S3FS {
             multipart_upload
         } else {
             let err = s3_error!(InvalidPart, "Missing multipart_upload");
-            return Err(err.into());
+            return Err(err);
         };
 
         let multipart_map = try_!(self.casfs.multipart_tree());
@@ -119,7 +119,7 @@ impl S3 for S3FS {
                 Some(pde) => pde,
                 None => {
                     error!("Missing part \"{}\" in multipart upload", part_key);
-                    return Err(s3_error!(InvalidArgument, "Part not uploaded").into());
+                    return Err(s3_error!(InvalidArgument, "Part not uploaded"));
                 }
             };
 
@@ -135,10 +135,10 @@ impl S3 for S3FS {
         let mut size = 0;
         let block_map = try_!(self.casfs.block_tree());
         for block in &blocks {
-            let bi = try_!(block_map.get(&block)).unwrap(); // unwrap is fine as all blocks in must be present
+            let bi = try_!(block_map.get(block)).unwrap(); // unwrap is fine as all blocks in must be present
             let block_info = Block::try_from(&*bi).expect("Block data is corrupt");
             size += block_info.size();
-            hasher.update(&block);
+            hasher.update(block);
         }
         let e_tag = hasher.finalize().into();
 
@@ -187,14 +187,14 @@ impl S3 for S3FS {
         };
 
         if !try_!(self.casfs.bucket_exists(bucket)) {
-            return Err(s3_error!(NoSuchBucket, "Target bucket does not exist").into());
+            return Err(s3_error!(NoSuchBucket, "Target bucket does not exist"));
         }
 
         let source_bk = try_!(self.casfs.bucket(&input.bucket));
         let mut obj_meta = match try_!(source_bk.get(&input.key)) {
             // unwrap here is safe as it means the DB is corrupted
             Some(enc_meta) => Object::try_from(&*enc_meta).unwrap(),
-            None => return Err(s3_error!(NoSuchKey, "Source key does not exist").into()),
+            None => return Err(s3_error!(NoSuchKey, "Source key does not exist")),
         };
 
         obj_meta.touch();
@@ -226,8 +226,7 @@ impl S3 for S3FS {
             return Err(s3_error!(
                 BucketAlreadyExists,
                 "A bucket with this name already exists"
-            )
-            .into());
+            ));
         }
 
         // TODO:
@@ -288,7 +287,7 @@ impl S3 for S3FS {
         let DeleteObjectInput { bucket, key, .. } = req.input;
 
         if !try_!(self.casfs.bucket_exists(&bucket)) {
-            return Err(s3_error!(NoSuchBucket, "Bucket does not exist").into());
+            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
         }
 
         // TODO: check for the key existence?
@@ -307,7 +306,7 @@ impl S3 for S3FS {
         let DeleteObjectsInput { bucket, delete, .. } = req.input;
 
         if !try_!(self.casfs.bucket_exists(&bucket)) {
-            return Err(s3_error!(NoSuchBucket, "Bucket does not exist").into());
+            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
         }
 
         let mut deleted_objects = Vec::with_capacity(delete.objects.len());
@@ -373,7 +372,7 @@ impl S3 for S3FS {
         // load metadata
         let bk = try_!(self.casfs.bucket(&bucket));
         let obj = match try_!(bk.get(&key)) {
-            None => return Err(s3_error!(NoSuchKey, "The specified key does not exist").into()),
+            None => return Err(s3_error!(NoSuchKey, "The specified key does not exist")),
             Some(obj) => obj,
         };
         let obj_meta = try_!(Object::try_from(&obj.to_vec()[..]));
@@ -423,7 +422,10 @@ impl S3 for S3FS {
         let HeadBucketInput { bucket, .. } = req.input;
 
         if !try_!(self.casfs.bucket_exists(&bucket)) {
-            return Err(s3_error!(NoSuchBucket, "The specified bucket does not exist").into());
+            return Err(s3_error!(
+                NoSuchBucket,
+                "The specified bucket does not exist"
+            ));
         }
 
         Ok(S3Response::new(HeadBucketOutput::default()))
@@ -438,7 +440,7 @@ impl S3 for S3FS {
 
         // TODO: move this to get_object_meta
         let obj = match try_!(bk.get(&key)) {
-            None => return Err(s3_error!(NoSuchKey, "The specified key does not exist").into()),
+            None => return Err(s3_error!(NoSuchKey, "The specified key does not exist")),
             Some(obj) => obj,
         };
         let obj_meta = try_!(Object::try_from(&obj.to_vec()[..]));
@@ -501,7 +503,7 @@ impl S3 for S3FS {
         } else {
             &[]
         };
-        let prefix_bytes = prefix.as_deref().or(Some("")).unwrap().as_bytes();
+        let prefix_bytes = prefix.as_deref().unwrap_or("").as_bytes();
 
         let mut objects = b
             .range(start_bytes..)
@@ -576,15 +578,14 @@ impl S3 for S3FS {
         let token = if let Some(ref rt) = continuation_token {
             let mut out = vec![0; rt.len() / 2];
             if hex_decode(rt.as_bytes(), &mut out).is_err() {
-                return Err(
-                    s3_error!(InvalidToken, "continuation token has an invalid format").into(),
-                );
+                return Err(s3_error!(
+                    InvalidToken,
+                    "continuation token has an invalid format"
+                ));
             };
             match String::from_utf8(out) {
                 Ok(s) => Some(s),
-                Err(_) => {
-                    return Err(s3_error!(InvalidToken, "continuation token is invalid").into())
-                }
+                Err(_) => return Err(s3_error!(InvalidToken, "continuation token is invalid")),
             }
         } else {
             None
@@ -599,7 +600,7 @@ impl S3 for S3FS {
         } else {
             &[]
         };
-        let prefix_bytes = prefix.as_deref().or(Some("")).unwrap().as_bytes();
+        let prefix_bytes = prefix.as_deref().unwrap_or("").as_bytes();
 
         let mut objects: Vec<_> = b
             .range(start_bytes..)
@@ -642,7 +643,7 @@ impl S3 for S3FS {
             max_keys: Some(key_count),
             contents: Some(objects),
             continuation_token,
-            delimiter: delimiter,
+            delimiter,
             encoding_type,
             name: Some(bucket),
             prefix,
@@ -679,7 +680,7 @@ impl S3 for S3FS {
         };
 
         if !try_!(self.casfs.bucket_exists(&bucket)) {
-            return Err(s3_error!(NoSuchBucket, "Bucket does not exist").into());
+            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
         }
 
         // save the data
@@ -733,8 +734,7 @@ impl S3 for S3FS {
             return Err(s3_error!(
                 InvalidRequest,
                 "You did not send the amount of bytes specified by the Content-Length HTTP header."
-            )
-            .into());
+            ));
         }
 
         let mp_map = try_!(self.casfs.multipart_tree());
