@@ -3,5 +3,4 @@ mod internal_macros;
 
 pub mod cas;
 pub mod metrics;
-pub mod passthrough;
 pub mod s3fs;

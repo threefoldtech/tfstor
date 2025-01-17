@@ -6,7 +6,7 @@ use super::{
     buffered_byte_stream::BufferedByteStream,
     object::Object,
 };
-use async_trait::async_trait;
+
 use faster_hex::hex_string;
 use futures::{
     channel::mpsc::unbounded,
@@ -15,25 +15,7 @@ use futures::{
     stream::{StreamExt, TryStreamExt},
 };
 use md5::{Digest, Md5};
-use s3_server::dto::{
-    CopyObjectOutput, CopyObjectRequest, CopyObjectResult, DeleteBucketOutput, DeleteBucketRequest,
-    DeleteObjectOutput, DeleteObjectRequest, DeleteObjectsRequest, PutObjectOutput,
-    PutObjectRequest,
-};
-use s3_server::{
-    dto::{
-        Bucket, ByteStream, CompleteMultipartUploadOutput, CompleteMultipartUploadRequest,
-        CreateBucketOutput, CreateBucketRequest, CreateMultipartUploadOutput,
-        CreateMultipartUploadRequest, GetBucketLocationOutput, GetBucketLocationRequest,
-        GetObjectOutput, GetObjectRequest, HeadBucketOutput, HeadBucketRequest, HeadObjectOutput,
-        HeadObjectRequest, ListBucketsOutput, ListBucketsRequest, ListObjectsOutput,
-        ListObjectsRequest, ListObjectsV2Output, ListObjectsV2Request, UploadPartOutput,
-        UploadPartRequest,
-    },
-    errors::S3StorageResult,
-    headers::AmzCopySource,
-    S3Storage,
-};
+use s3_server::dto::{Bucket, ByteStream};
 use sled::{Db, Transactional};
 use std::{
     convert::{TryFrom, TryInto},
@@ -419,158 +401,5 @@ impl CasFS {
             content_hash.finalize().into(),
             size,
         ))
-    }
-}
-
-#[async_trait]
-impl S3Storage for CasFS {
-    async fn complete_multipart_upload(
-        &self,
-        _input: CompleteMultipartUploadRequest,
-    ) -> S3StorageResult<CompleteMultipartUploadOutput, s3_server::dto::CompleteMultipartUploadError>
-    {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn copy_object(
-        &self,
-        input: CopyObjectRequest,
-    ) -> S3StorageResult<CopyObjectOutput, s3_server::dto::CopyObjectError> {
-        let copy_source = AmzCopySource::from_header_str(&input.copy_source)
-            .map_err(|err| invalid_request!("Invalid header: x-amz-copy-source", err))?;
-
-        let (bucket, key) = match copy_source {
-            AmzCopySource::AccessPoint { .. } => {
-                return Err(not_supported!("Access point is not supported yet.").into())
-            }
-            AmzCopySource::Bucket { bucket, key } => (bucket, key),
-        };
-
-        if !trace_try!(self.bucket_exists(bucket)) {
-            return Err(code_error!(NoSuchBucket, "Target bucket does not exist").into());
-        }
-
-        let source_bk = trace_try!(self.bucket(&input.bucket));
-        let mut obj_meta = match trace_try!(source_bk.get(&input.key)) {
-            // unwrap here is safe as it means the DB is corrupted
-            Some(enc_meta) => Object::try_from(&*enc_meta).unwrap(),
-            None => return Err(code_error!(NoSuchKey, "Source key does not exist").into()),
-        };
-
-        obj_meta.touch();
-
-        // TODO: check duplicate?
-        let dst_bk = trace_try!(self.bucket(bucket));
-        trace_try!(dst_bk.insert(key, Vec::<u8>::from(&obj_meta)));
-
-        Ok(CopyObjectOutput {
-            copy_object_result: Some(CopyObjectResult {
-                e_tag: Some(obj_meta.format_e_tag()),
-                last_modified: Some(obj_meta.format_ctime()),
-            }),
-            ..CopyObjectOutput::default()
-        })
-    }
-
-    async fn create_multipart_upload(
-        &self,
-        _input: CreateMultipartUploadRequest,
-    ) -> S3StorageResult<CreateMultipartUploadOutput, s3_server::dto::CreateMultipartUploadError>
-    {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn create_bucket(
-        &self,
-        _input: CreateBucketRequest,
-    ) -> S3StorageResult<CreateBucketOutput, s3_server::dto::CreateBucketError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn delete_bucket(
-        &self,
-        _input: DeleteBucketRequest,
-    ) -> S3StorageResult<DeleteBucketOutput, s3_server::dto::DeleteBucketError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn delete_object(
-        &self,
-        _input: DeleteObjectRequest,
-    ) -> S3StorageResult<DeleteObjectOutput, s3_server::dto::DeleteObjectError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn delete_objects(
-        &self,
-        _input: DeleteObjectsRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::DeleteObjectsOutput,
-        s3_server::dto::DeleteObjectsError,
-    > {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn get_bucket_location(
-        &self,
-        _input: GetBucketLocationRequest,
-    ) -> S3StorageResult<GetBucketLocationOutput, s3_server::dto::GetBucketLocationError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn get_object(
-        &self,
-        _input: GetObjectRequest,
-    ) -> S3StorageResult<GetObjectOutput, s3_server::dto::GetObjectError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn head_bucket(
-        &self,
-        _input: HeadBucketRequest,
-    ) -> S3StorageResult<HeadBucketOutput, s3_server::dto::HeadBucketError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn head_object(
-        &self,
-        _input: HeadObjectRequest,
-    ) -> S3StorageResult<HeadObjectOutput, s3_server::dto::HeadObjectError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn list_buckets(
-        &self,
-        _: ListBucketsRequest,
-    ) -> S3StorageResult<ListBucketsOutput, s3_server::dto::ListBucketsError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn list_objects(
-        &self,
-        _input: ListObjectsRequest,
-    ) -> S3StorageResult<ListObjectsOutput, s3_server::dto::ListObjectsError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn list_objects_v2(
-        &self,
-        _input: ListObjectsV2Request,
-    ) -> S3StorageResult<ListObjectsV2Output, s3_server::dto::ListObjectsV2Error> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn put_object(
-        &self,
-        _input: PutObjectRequest,
-    ) -> S3StorageResult<PutObjectOutput, s3_server::dto::PutObjectError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
-    }
-
-    async fn upload_part(
-        &self,
-        _input: UploadPartRequest,
-    ) -> S3StorageResult<UploadPartOutput, s3_server::dto::UploadPartError> {
-        Err(code_error!(NotImplemented, "Not Implemented").into())
     }
 }
