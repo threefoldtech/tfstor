@@ -4,9 +4,11 @@ use super::{
     block::{Block, BlockID, BLOCKID_SIZE},
     bucket_meta::BucketMeta,
     buffered_byte_stream::BufferedByteStream,
+    multipart::MultiPart,
     object::Object,
 };
 
+use chrono::Utc;
 use faster_hex::hex_string;
 use futures::{
     channel::mpsc::unbounded,
@@ -77,6 +79,91 @@ impl Drop for PendingMarker {
     }
 }
 
+use std::error::Error;
+use std::fmt;
+
+// Define the error type
+#[derive(Debug)]
+pub enum MetaError {
+    KeyNotFound,
+    KeyAlreadyExists,
+    CollectionNotFound,
+    BucketNotFound,
+    UnknownError(String),
+}
+
+// Implement the std::error::Error trait
+impl Error for MetaError {}
+
+// Implement the Display trait for custom error messages
+impl fmt::Display for MetaError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MetaError::KeyNotFound => write!(f, "Key not found"),
+            MetaError::KeyAlreadyExists => write!(f, "Key already exists"),
+            MetaError::CollectionNotFound => write!(f, "Collection not found"),
+            MetaError::BucketNotFound => write!(f, "Bucket not found"),
+            MetaError::UnknownError(ref s) => write!(f, "Unknown error: {}", s),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TreeWrapper {
+    tree: sled::Tree,
+}
+
+impl TreeWrapper {
+    fn new(tree: sled::Tree) -> Self {
+        Self { tree }
+    }
+
+    pub fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), MetaError> {
+        match self.tree.insert(key, value) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    pub fn remove(&self, key: String) -> Result<(), MetaError> {
+        match self.tree.remove(key) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    pub fn create_block_obj<K: AsRef<[u8]>>(&self, key: K) -> Result<Block, MetaError> {
+        let block_data = self.get(key)?.ok_or(MetaError::KeyNotFound)?;
+        let block = match Block::try_from(&*block_data) {
+            Ok(b) => b,
+            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+        };
+        Ok(block)
+    }
+
+    pub fn create_multipart_part<K: AsRef<[u8]>>(&self, key: K) -> Result<MultiPart, MetaError> {
+        let part_data_enc = self.get(&key)?;
+        let part_data_enc = match part_data_enc {
+            Some(pde) => pde,
+            None => {
+                return Err(MetaError::KeyNotFound);
+            }
+        };
+
+        // unwrap here is safe as it is a coding error
+        let mp = MultiPart::try_from(&*part_data_enc).expect("Corrupted multipart data");
+        Ok(mp)
+    }
+
+    fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<sled::IVec>, MetaError> {
+        match self.tree.get(key) {
+            Ok(Some(v)) => Ok(Some(v)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+}
+
 impl CasFS {
     pub fn new(mut root: PathBuf, mut meta_path: PathBuf, metrics: SharedMetrics) -> Self {
         meta_path.push("db");
@@ -87,44 +174,118 @@ impl CasFS {
         Self { db, root, metrics }
     }
 
-    /// Open the tree containing the block map.
-    pub fn block_tree(&self) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(BLOCK_TREE)
-    }
-
-    /// Open the tree containing the path map.
-    fn path_tree(&self) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(PATH_TREE)
-    }
-
-    /// Open the tree containing the multipart parts.
-    pub fn multipart_tree(&self) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(MULTIPART_TREE)
-    }
-
-    /// Check if a bucket with a given name exists.
-    pub fn bucket_exists(&self, bucket_name: &str) -> Result<bool, sled::Error> {
-        self.bucket_meta_tree()?.contains_key(bucket_name)
-    }
-
-    /// Open the tree containing the objects in a bucket.
-    pub fn bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
+    pub fn sled_bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(bucket_name)
     }
 
+    /// Open the tree containing the block map.
+    pub fn block_tree(&self) -> Result<TreeWrapper, MetaError> {
+        //self.db.open_tree(BLOCK_TREE)
+        let tree = self.get_tree(BLOCK_TREE)?;
+        Ok(TreeWrapper::new(tree))
+    }
+
+    pub fn multipart_tree(&self) -> Result<TreeWrapper, MetaError> {
+        let tree = self.get_tree(MULTIPART_TREE)?;
+        Ok(TreeWrapper::new(tree))
+    }
+
+    /// Check if a bucket with a given name exists.
+    pub fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
+        let tree = self.get_tree(BUCKET_META_TREE)?;
+        match tree.contains_key(bucket_name) {
+            Ok(true) => Ok(true),
+            Ok(false) => Ok(false),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    // create a meta object and insert it into the database
+    pub fn create_insert_meta(
+        &self,
+        bucket_name: &str,
+        key: &str,
+        size: u64,
+        e_tag: BlockID,
+        parts: usize,
+        blocks: Vec<BlockID>,
+    ) -> Result<Object, MetaError> {
+        let obj_meta = Object::new(size, e_tag, parts, blocks);
+
+        let bucket = self.get_bucket(bucket_name)?;
+
+        match bucket.insert(key, Vec::<u8>::from(&obj_meta)) {
+            Ok(_) => Ok(obj_meta),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    // get meta object from the DB
+    pub fn get_object_meta(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
+        let bucket = self.get_bucket(bucket)?;
+        let object = match bucket.get(key) {
+            Ok(o) => o,
+            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+        };
+        match object {
+            Some(o) => Ok(Object::try_from(&*o).expect("Malformed object")),
+            None => Err(MetaError::KeyNotFound),
+        }
+    }
+
+    // create and insert a new  bucket
+    pub fn create_bucket(&self, bucket_name: String) -> Result<(), MetaError> {
+        let bucket_meta = self.get_tree(BUCKET_META_TREE)?;
+
+        let bm = Vec::from(&BucketMeta::new(
+            Utc::now().timestamp(),
+            bucket_name.clone(),
+        ));
+
+        match bucket_meta.insert(bucket_name, bm) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    /// Open the tree containing the objects in a bucket.
+    fn get_tree(&self, bucket_name: &str) -> Result<sled::Tree, MetaError> {
+        match self.db.open_tree(bucket_name) {
+            Ok(tree) => Ok(tree),
+            Err(e) => match e {
+                sled::Error::CollectionNotFound(_) => Err(MetaError::CollectionNotFound),
+                _ => Err(MetaError::UnknownError(e.to_string())),
+            },
+        }
+    }
+
+    fn get_bucket(&self, bucket_name: &str) -> Result<sled::Tree, MetaError> {
+        self.get_tree(bucket_name)
+    }
+
+    // Open the tree containing the path map.
+    fn sled_path_tree(&self) -> Result<sled::Tree, sled::Error> {
+        self.db.open_tree(PATH_TREE)
+    }
+
+    /// Open the tree containing the block map.
+    fn sled_block_tree(&self) -> Result<sled::Tree, sled::Error> {
+        self.db.open_tree(BLOCK_TREE)
+    }
+
     /// Open the tree containing the bucket metadata.
-    pub fn bucket_meta_tree(&self) -> Result<sled::Tree, sled::Error> {
+    fn sled_bucket_meta_tree(&self) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(BUCKET_META_TREE)
     }
 
     /// Remove a bucket and its associated metadata.
     // TODO: this is very much not optimal
     pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), sled::Error> {
-        let bmt = self.bucket_meta_tree()?;
+        let bmt = self.sled_bucket_meta_tree()?;
         bmt.remove(bucket_name)?;
         #[cfg(feature = "refcount")]
         {
-            let bucket = self.bucket(bucket_name)?;
+            let bucket = self.sled_bucket(bucket_name)?;
             for key in bucket.iter().keys() {
                 self.delete_object(
                     bucket_name,
@@ -150,9 +311,9 @@ impl CasFS {
         {
             // Remove an object. This fetches the object, decrements the refcount of all blocks,
             // and removes blocks which are no longer referenced.
-            let block_map = self.block_tree()?;
-            let path_map = self.path_tree()?;
-            let bucket = self.bucket(bucket)?;
+            let block_map = self.sled_block_tree()?;
+            let path_map = self.sled_path_tree()?;
+            let bucket = self.sled_bucket(bucket)?;
             let blocks_to_delete_res: Result<Vec<Block>, sled::transaction::TransactionError> =
                 (&bucket, &block_map).transaction(|(bucket, blocks)| {
                     match bucket.get(object)? {
@@ -227,7 +388,7 @@ impl CasFS {
     /// Get a list of all buckets in the system.
     pub fn buckets(&self) -> Result<Vec<Bucket>, sled::Error> {
         Ok(self
-            .bucket_meta_tree()?
+            .sled_bucket_meta_tree()?
             .scan_prefix([])
             .values()
             .filter_map(|raw_value| {
@@ -245,8 +406,8 @@ impl CasFS {
     /// Save data on the filesystem. A list of block ID's used as keys for the data blocks is
     /// returned, along with the hash of the full byte stream, and the length of the stream.
     pub async fn store_bytes(&self, data: ByteStream) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
-        let block_map = self.block_tree()?;
-        let path_map = self.path_tree()?;
+        let block_map = self.sled_block_tree()?;
+        let path_map = self.sled_path_tree()?;
         let (tx, rx) = unbounded();
         let mut content_hash = Md5::new();
         let data = BufferedByteStream::new(data);

@@ -4,7 +4,6 @@ use std::ops::Deref;
 use std::path::PathBuf;
 
 use bytes::Bytes;
-use chrono::prelude::*;
 use faster_hex::{hex_decode, hex_string};
 use futures::Stream;
 use futures::StreamExt;
@@ -18,9 +17,9 @@ use s3s::dto::StreamingBlob;
 use s3s::dto::Timestamp;
 use s3s::dto::{
     Bucket, CompleteMultipartUploadInput, CompleteMultipartUploadOutput, CopyObjectInput,
-    CopyObjectOutput, CopyObjectResult, CopySource, CreateBucketInput, CreateBucketOutput,
-    CreateMultipartUploadInput, CreateMultipartUploadOutput, DeleteBucketInput, DeleteBucketOutput,
-    DeleteObjectInput, DeleteObjectOutput, DeleteObjectsInput, DeleteObjectsOutput, DeletedObject,
+    CopyObjectOutput, CreateBucketInput, CreateBucketOutput, CreateMultipartUploadInput,
+    CreateMultipartUploadOutput, DeleteBucketInput, DeleteBucketOutput, DeleteObjectInput,
+    DeleteObjectOutput, DeleteObjectsInput, DeleteObjectsOutput, DeletedObject,
     GetBucketLocationInput, GetBucketLocationOutput, GetObjectInput, GetObjectOutput,
     HeadBucketInput, HeadBucketOutput, HeadObjectInput, HeadObjectOutput, ListBucketsInput,
     ListBucketsOutput, ListObjectsInput, ListObjectsOutput, ListObjectsV2Input,
@@ -31,9 +30,7 @@ use s3s::S3Result;
 use s3s::S3;
 use s3s::{S3Request, S3Response};
 
-use crate::cas::block::Block;
 use crate::cas::block_stream::BlockStream;
-use crate::cas::bucket_meta::BucketMeta;
 use crate::cas::multipart::MultiPart;
 use crate::cas::object::Object;
 use crate::cas::range_request::parse_range_request;
@@ -114,18 +111,14 @@ impl S3 for S3FS {
                 )));
             }
             let part_key = format!("{}-{}-{}-{}", &bucket, &key, &upload_id, part_number);
-            let part_data_enc = try_!(multipart_map.get(&part_key));
-            let part_data_enc = match part_data_enc {
-                Some(pde) => pde,
-                None => {
-                    error!("Missing part \"{}\" in multipart upload", part_key);
+
+            let mp = match multipart_map.create_multipart_part(&part_key) {
+                Ok(mp) => mp,
+                Err(e) => {
+                    error!("Missing part \"{}\" in multipart upload: {}", part_key, e);
                     return Err(s3_error!(InvalidArgument, "Part not uploaded"));
                 }
             };
-
-            // unwrap here is safe as it is a coding error
-            let mp = MultiPart::try_from(&*part_data_enc).expect("Corrupted multipart data");
-
             blocks.extend_from_slice(mp.blocks());
         }
 
@@ -135,18 +128,24 @@ impl S3 for S3FS {
         let mut size = 0;
         let block_map = try_!(self.casfs.block_tree());
         for block in &blocks {
-            let bi = try_!(block_map.get(block)).unwrap(); // unwrap is fine as all blocks in must be present
-            let block_info = Block::try_from(&*bi).expect("Block data is corrupt");
+            //let bi = try_!(block_map.wek_get(block)).unwrap(); // unwrap is fine as all blocks in must be present
+            //let block_info = Block::try_from(&*bi).expect("Block data is corrupt");
+            let block_info = block_map
+                .create_block_obj(block)
+                .expect("Block data is corrupt");
             size += block_info.size();
             hasher.update(block);
         }
         let e_tag = hasher.finalize().into();
 
-        let bc = try_!(self.casfs.bucket(&bucket));
-
-        let object = Object::new(size as u64, e_tag, cnt as usize, blocks);
-
-        try_!(bc.insert(&key, Vec::<u8>::from(&object)));
+        let object_meta = try_!(self.casfs.create_insert_meta(
+            &bucket,
+            &key,
+            size as u64,
+            e_tag,
+            cnt as usize,
+            blocks
+        ));
 
         // Try to delete the multipart metadata. If this fails, it is not really an issue.
         for part in multipart_upload.parts.into_iter().flatten() {
@@ -166,7 +165,7 @@ impl S3 for S3FS {
         let output = CompleteMultipartUploadOutput {
             bucket: Some(bucket),
             key: Some(key),
-            e_tag: Some(object.format_e_tag()),
+            e_tag: Some(object_meta.format_e_tag()),
             ..Default::default()
         };
         Ok(S3Response::new(output))
@@ -174,46 +173,11 @@ impl S3 for S3FS {
 
     async fn copy_object(
         &self,
-        req: S3Request<CopyObjectInput>,
+        _: S3Request<CopyObjectInput>,
     ) -> S3Result<S3Response<CopyObjectOutput>> {
-        let input = req.input;
-        let (bucket, key) = match input.copy_source {
-            CopySource::AccessPoint { .. } => return Err(s3_error!(NotImplemented)),
-            CopySource::Bucket {
-                ref bucket,
-                ref key,
-                ..
-            } => (bucket, key),
-        };
-
-        if !try_!(self.casfs.bucket_exists(bucket)) {
-            return Err(s3_error!(NoSuchBucket, "Target bucket does not exist"));
-        }
-
-        let source_bk = try_!(self.casfs.bucket(&input.bucket));
-        let mut obj_meta = match try_!(source_bk.get(&input.key)) {
-            // unwrap here is safe as it means the DB is corrupted
-            Some(enc_meta) => Object::try_from(&*enc_meta).unwrap(),
-            None => return Err(s3_error!(NoSuchKey, "Source key does not exist")),
-        };
-
-        obj_meta.touch();
-
-        // TODO: check duplicate?
-        let dst_bk = try_!(self.casfs.bucket(bucket));
-        try_!(dst_bk.insert(key.as_bytes(), Vec::<u8>::from(&obj_meta)));
-
-        let copy_object_result = CopyObjectResult {
-            e_tag: Some(obj_meta.format_e_tag()),
-            last_modified: Some(obj_meta.last_modified().into()),
-            ..Default::default()
-        };
-
-        let output = CopyObjectOutput {
-            copy_object_result: Some(copy_object_result),
-            ..Default::default()
-        };
-        Ok(S3Response::new(output))
+        // see https://github.com/threefoldtech/s3-cas/blob/bee016998a4167b781082e1897072af0a64992e2/src/cas/fs.rs#L522-L560
+        // which i'm not sure if it's implemented correctly
+        Err(s3_error!(NotImplemented))
     }
 
     async fn create_bucket(
@@ -229,17 +193,7 @@ impl S3 for S3FS {
             ));
         }
 
-        // TODO:
-        // - move ALL bucket _creation_ to the casfs
-        // - revert the bucket_meta_tree() to private method
-        let bucket_meta = try_!(self.casfs.bucket_meta_tree());
-
-        let bm = Vec::from(&BucketMeta::new(
-            Utc::now().timestamp(),
-            input.bucket.clone(),
-        ));
-
-        try_!(bucket_meta.insert(&input.bucket, bm));
+        try_!(self.casfs.create_bucket(input.bucket.clone()));
 
         self.metrics.inc_bucket_count();
 
@@ -370,12 +324,13 @@ impl S3 for S3FS {
         } = input;
 
         // load metadata
-        let bk = try_!(self.casfs.bucket(&bucket));
+        /*let bk = try_!(self.casfs.bucket(&bucket));
         let obj = match try_!(bk.get(&key)) {
             None => return Err(s3_error!(NoSuchKey, "The specified key does not exist")),
             Some(obj) => obj,
         };
-        let obj_meta = try_!(Object::try_from(&obj.to_vec()[..]));
+        let obj_meta = try_!(Object::try_from(&obj.to_vec()[..]));*/
+        let obj_meta = try_!(self.casfs.get_object_meta(&bucket, &key));
 
         let e_tag = obj_meta.format_e_tag();
         let stream_size = obj_meta.size();
@@ -394,8 +349,9 @@ impl S3 for S3FS {
         for block in obj_meta.blocks() {
             // unwrap here is safe as we only add blocks to the list of an object if they are
             // corectly inserted in the block map
-            let block_meta_enc = try_!(block_map.get(block)).unwrap();
-            let block_meta = try_!(Block::try_from(&*block_meta_enc));
+            //let block_meta_enc = try_!(block_map.wek_get(block)).unwrap();
+            //let block_meta = try_!(Block::try_from(&*block_meta_enc));
+            let block_meta = try_!(block_map.create_block_obj(block));
             block_size += block_meta.size();
             paths.push((block_meta.disk_path(self.root.clone()), block_meta.size()));
         }
@@ -436,14 +392,8 @@ impl S3 for S3FS {
         req: S3Request<HeadObjectInput>,
     ) -> S3Result<S3Response<HeadObjectOutput>> {
         let HeadObjectInput { bucket, key, .. } = req.input;
-        let bk = try_!(self.casfs.bucket(&bucket));
 
-        // TODO: move this to get_object_meta
-        let obj = match try_!(bk.get(&key)) {
-            None => return Err(s3_error!(NoSuchKey, "The specified key does not exist")),
-            Some(obj) => obj,
-        };
-        let obj_meta = try_!(Object::try_from(&obj.to_vec()[..]));
+        let obj_meta = try_!(self.casfs.get_object_meta(&bucket, &key));
 
         let output = HeadObjectOutput {
             content_length: Some(obj_meta.size() as i64),
@@ -494,7 +444,7 @@ impl S3 for S3FS {
             .map(|mk| if mk > MAX_KEYS { MAX_KEYS } else { mk })
             .unwrap_or(MAX_KEYS);
 
-        let b = try_!(self.casfs.bucket(&bucket));
+        let b = try_!(self.casfs.sled_bucket(&bucket));
 
         let start_bytes = if let Some(ref marker) = marker {
             marker.as_bytes()
@@ -569,7 +519,7 @@ impl S3 for S3FS {
             ..
         } = req.input;
 
-        let b = try_!(self.casfs.bucket(&bucket));
+        let b = try_!(self.casfs.sled_bucket(&bucket));
 
         let key_count = max_keys
             .map(|mk| if mk > MAX_KEYS { MAX_KEYS } else { mk })
@@ -689,12 +639,12 @@ impl S3 for S3FS {
             ByteStream::new_with_size(converted_stream, content_length.unwrap() as usize);
         let (blocks, hash, size) = try_!(self.casfs.store_bytes(byte_stream).await);
 
-        // save the metadata
-        let obj_meta = Object::new(size, hash, 0, blocks);
-        try_!(try_!(self.casfs.bucket(&bucket)).insert(&key, Vec::<u8>::from(&obj_meta)));
+        let obj_meta = try_!(self
+            .casfs
+            .create_insert_meta(&bucket, &key, size, hash, 0, blocks));
 
         let output = PutObjectOutput {
-            //e_tag: Some(obj_meta.format_e_tag()),
+            e_tag: Some(obj_meta.format_e_tag()),
             ..Default::default()
         };
         Ok(S3Response::new(output))
@@ -753,7 +703,7 @@ impl S3 for S3FS {
 
         let enc_mp = Vec::from(&mp);
 
-        try_!(mp_map.insert(storage_key, enc_mp));
+        try_!(mp_map.insert(storage_key.into(), enc_mp));
 
         let output = UploadPartOutput {
             e_tag: Some(e_tag),
