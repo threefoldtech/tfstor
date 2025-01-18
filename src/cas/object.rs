@@ -34,6 +34,10 @@ impl Object {
         }
     }
 
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.into()
+    }
+
     pub fn format_e_tag(&self) -> String {
         if self.parts == 0 {
             format!("\"{}\"", hex_string(&self.e_tag))

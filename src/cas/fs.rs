@@ -109,12 +109,14 @@ impl fmt::Display for MetaError {
     }
 }
 
+/// MetaTree is a wrapper around a sled::Tree that provides a higher level API for interacting with
+/// TODO: it should be part of the meta's `Object` struct
 #[derive(Clone)]
-pub struct TreeWrapper {
+pub struct MetaTree {
     tree: sled::Tree,
 }
 
-impl TreeWrapper {
+impl MetaTree {
     fn new(tree: sled::Tree) -> Self {
         Self { tree }
     }
@@ -201,6 +203,7 @@ impl TreeWrapper {
             })
     }
 
+    // get an object from the tree
     fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<sled::IVec>, MetaError> {
         match self.tree.get(key) {
             Ok(Some(v)) => Ok(Some(v)),
@@ -220,21 +223,21 @@ impl CasFS {
         Self { db, root, metrics }
     }
 
-    pub fn get_bucket(&self, bucket_name: &str) -> Result<TreeWrapper, MetaError> {
+    pub fn get_bucket(&self, bucket_name: &str) -> Result<MetaTree, MetaError> {
         let tree = self.get_tree(bucket_name)?;
-        Ok(TreeWrapper::new(tree))
+        Ok(MetaTree::new(tree))
     }
 
     /// Open the tree containing the block map.
-    pub fn block_tree(&self) -> Result<TreeWrapper, MetaError> {
+    pub fn block_tree(&self) -> Result<MetaTree, MetaError> {
         //self.db.open_tree(BLOCK_TREE)
         let tree = self.get_tree(BLOCK_TREE)?;
-        Ok(TreeWrapper::new(tree))
+        Ok(MetaTree::new(tree))
     }
 
-    pub fn multipart_tree(&self) -> Result<TreeWrapper, MetaError> {
+    pub fn multipart_tree(&self) -> Result<MetaTree, MetaError> {
         let tree = self.get_tree(MULTIPART_TREE)?;
-        Ok(TreeWrapper::new(tree))
+        Ok(MetaTree::new(tree))
     }
 
     /// Check if a bucket with a given name exists.
@@ -261,7 +264,7 @@ impl CasFS {
 
         let bucket = self.get_tree(bucket_name)?;
 
-        match bucket.insert(key, Vec::<u8>::from(&obj_meta)) {
+        match bucket.insert(key, obj_meta.to_vec()) {
             Ok(_) => Ok(obj_meta),
             Err(e) => Err(MetaError::UnknownError(e.to_string())),
         }
