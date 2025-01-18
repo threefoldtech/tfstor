@@ -348,6 +348,28 @@ impl CasFS {
         Ok(())
     }
 
+    /// Get a list of all buckets in the system.
+    pub fn get_buckets(&self) -> Result<Vec<Bucket>, MetaError> {
+        let bucket_tree = match self.sled_bucket_meta_tree() {
+            Ok(t) => t,
+            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+        };
+        let buckets = bucket_tree
+            .scan_prefix([])
+            .values()
+            .filter_map(|raw_value| {
+                let value = match raw_value {
+                    Err(_) => return None,
+                    Ok(v) => v,
+                };
+                // unwrap here is fine as it means the db is corrupt
+                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
+                Some(bucket_meta.into())
+            })
+            .collect();
+        Ok(buckets)
+    }
+
     /// Delete an object from a bucket.
     pub async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), sled::Error> {
         info!("Deleting object {}", object);
@@ -433,24 +455,6 @@ impl CasFS {
 
             Ok(())
         }
-    }
-
-    /// Get a list of all buckets in the system.
-    pub fn buckets(&self) -> Result<Vec<Bucket>, sled::Error> {
-        Ok(self
-            .sled_bucket_meta_tree()?
-            .scan_prefix([])
-            .values()
-            .filter_map(|raw_value| {
-                let value = match raw_value {
-                    Err(_) => return None,
-                    Ok(v) => v,
-                };
-                // unwrap here is fine as it means the db is corrupt
-                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
-                Some(bucket_meta.into())
-            })
-            .collect())
     }
 
     /// Save data on the filesystem. A list of block ID's used as keys for the data blocks is

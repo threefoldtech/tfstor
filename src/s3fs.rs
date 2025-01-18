@@ -406,7 +406,7 @@ impl S3 for S3FS {
         &self,
         _: S3Request<ListBucketsInput>,
     ) -> S3Result<S3Response<ListBucketsOutput>> {
-        let csfs_buckets = try_!(self.casfs.buckets());
+        let csfs_buckets = try_!(self.casfs.get_buckets());
         let mut buckets = Vec::with_capacity(csfs_buckets.len());
         for bucket in csfs_buckets {
             let bucket = Bucket {
