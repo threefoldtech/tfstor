@@ -1,6 +1,4 @@
-use std::convert::TryFrom;
 use std::io::{self, ErrorKind};
-use std::ops::Deref;
 use std::path::PathBuf;
 
 use bytes::Bytes;
@@ -32,7 +30,6 @@ use s3s::{S3Request, S3Response};
 
 use crate::cas::block_stream::BlockStream;
 use crate::cas::multipart::MultiPart;
-use crate::cas::object::Object;
 use crate::cas::range_request::parse_range_request;
 use crate::cas::CasFS;
 use crate::metrics::SharedMetrics;
@@ -444,7 +441,7 @@ impl S3 for S3FS {
             .map(|mk| if mk > MAX_KEYS { MAX_KEYS } else { mk })
             .unwrap_or(MAX_KEYS);
 
-        let b = try_!(self.casfs.sled_bucket(&bucket));
+        let b = try_!(self.casfs.get_bucket(&bucket));
 
         let start_bytes = if let Some(ref marker) = marker {
             marker.as_bytes()
@@ -456,27 +453,15 @@ impl S3 for S3FS {
         let prefix_bytes = prefix.as_deref().unwrap_or("").as_bytes();
 
         let mut objects = b
-            .range(start_bytes..)
-            .filter_map(|read_result| match read_result {
-                Err(_) => None,
-                Ok((k, v)) => Some((k, v)),
-            })
-            .take_while(|(raw_key, _)| raw_key.starts_with(prefix_bytes))
-            .map(|(raw_key, raw_value)| {
-                // SAFETY: we only insert valid utf8 strings
-                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
-                // unwrap is fine as it would mean either a coding error or a corrupt DB
-                let obj = Object::try_from(&*raw_value).unwrap();
-
-                s3s::dto::Object {
-                    key: Some(key),
-                    e_tag: Some(obj.format_e_tag()),
-                    last_modified: Some(obj.last_modified().into()),
-                    owner: None,
-                    size: Some(obj.size() as i64),
-                    storage_class: None,
-                    ..Default::default()
-                }
+            .range_filter(start_bytes, prefix_bytes)
+            .map(|(key, obj)| s3s::dto::Object {
+                key: Some(key),
+                e_tag: Some(obj.format_e_tag()),
+                last_modified: Some(obj.last_modified().into()),
+                owner: None,
+                size: Some(obj.size() as i64),
+                storage_class: None,
+                ..Default::default()
             })
             .take((key_count + 1) as usize)
             .collect::<Vec<_>>();
@@ -519,7 +504,7 @@ impl S3 for S3FS {
             ..
         } = req.input;
 
-        let b = try_!(self.casfs.sled_bucket(&bucket));
+        let b = try_!(self.casfs.get_bucket(&bucket));
 
         let key_count = max_keys
             .map(|mk| if mk > MAX_KEYS { MAX_KEYS } else { mk })
@@ -553,31 +538,15 @@ impl S3 for S3FS {
         let prefix_bytes = prefix.as_deref().unwrap_or("").as_bytes();
 
         let mut objects: Vec<_> = b
-            .range(start_bytes..)
-            .filter_map(|read_result| match read_result {
-                Ok((r, k)) => Some((r, k)),
-                Err(_) => None,
-            })
-            .skip_while(|(raw_key, _)| match start_after {
-                None => false,
-                Some(ref start_after) => raw_key.deref() <= start_after.as_bytes(),
-            })
-            .take_while(|(raw_key, _)| raw_key.starts_with(prefix_bytes))
-            .map(|(raw_key, raw_value)| {
-                // SAFETY: we only insert valid utf8 strings
-                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
-                // unwrap is fine as it would mean either a coding error or a corrupt DB
-                let obj = Object::try_from(&*raw_value).unwrap();
-
-                s3s::dto::Object {
-                    key: Some(key),
-                    e_tag: Some(obj.format_e_tag()),
-                    last_modified: Some(obj.last_modified().into()),
-                    owner: None,
-                    size: Some(obj.size() as i64),
-                    storage_class: None,
-                    ..Default::default()
-                }
+            .range_filter_skip(start_bytes, prefix_bytes, start_after.clone())
+            .map(|(key, obj)| s3s::dto::Object {
+                key: Some(key),
+                e_tag: Some(obj.format_e_tag()),
+                last_modified: Some(obj.last_modified().into()),
+                owner: None,
+                size: Some(obj.size() as i64),
+                storage_class: None,
+                ..Default::default()
             })
             .take((key_count + 1) as usize)
             .collect();

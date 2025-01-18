@@ -1,4 +1,5 @@
 use crate::metrics::SharedMetrics;
+use std::ops::Deref;
 
 use super::{
     block::{Block, BlockID, BLOCKID_SIZE},
@@ -155,6 +156,51 @@ impl TreeWrapper {
         Ok(mp)
     }
 
+    // TODO: merge this method with range_filter
+    pub fn range_filter_skip<'a>(
+        &self,
+        start_bytes: &'a [u8],
+        prefix_bytes: &'a [u8],
+        start_after: Option<String>,
+    ) -> impl Iterator<Item = (String, Object)> + 'a {
+        self.tree
+            .range(start_bytes..)
+            .filter_map(|read_result| match read_result {
+                Err(_) => None,
+                Ok((k, v)) => Some((k, v)),
+            })
+            .skip_while(move |(raw_key, _)| match start_after {
+                None => false,
+                Some(ref start_after) => raw_key.deref() <= start_after.as_bytes(),
+            })
+            .take_while(move |(raw_key, _)| raw_key.starts_with(prefix_bytes))
+            .map(|(raw_key, raw_value)| {
+                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
+                let obj = Object::try_from(&*raw_value).unwrap();
+                (key, obj)
+            })
+    }
+
+    // TODO: merge this method with range_filter_skip
+    pub fn range_filter<'a>(
+        &self,
+        start_bytes: &'a [u8],
+        prefix_bytes: &'a [u8],
+    ) -> impl Iterator<Item = (String, Object)> + 'a {
+        self.tree
+            .range(start_bytes..)
+            .filter_map(|read_result| match read_result {
+                Err(_) => None,
+                Ok((k, v)) => Some((k, v)),
+            })
+            .take_while(move |(raw_key, _)| raw_key.starts_with(prefix_bytes))
+            .map(|(raw_key, raw_value)| {
+                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
+                let obj = Object::try_from(&*raw_value).unwrap();
+                (key, obj)
+            })
+    }
+
     fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<sled::IVec>, MetaError> {
         match self.tree.get(key) {
             Ok(Some(v)) => Ok(Some(v)),
@@ -174,8 +220,9 @@ impl CasFS {
         Self { db, root, metrics }
     }
 
-    pub fn sled_bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(bucket_name)
+    pub fn get_bucket(&self, bucket_name: &str) -> Result<TreeWrapper, MetaError> {
+        let tree = self.get_tree(bucket_name)?;
+        Ok(TreeWrapper::new(tree))
     }
 
     /// Open the tree containing the block map.
@@ -212,7 +259,7 @@ impl CasFS {
     ) -> Result<Object, MetaError> {
         let obj_meta = Object::new(size, e_tag, parts, blocks);
 
-        let bucket = self.get_bucket(bucket_name)?;
+        let bucket = self.get_tree(bucket_name)?;
 
         match bucket.insert(key, Vec::<u8>::from(&obj_meta)) {
             Ok(_) => Ok(obj_meta),
@@ -222,7 +269,7 @@ impl CasFS {
 
     // get meta object from the DB
     pub fn get_object_meta(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
-        let bucket = self.get_bucket(bucket)?;
+        let bucket = self.get_tree(bucket)?;
         let object = match bucket.get(key) {
             Ok(o) => o,
             Err(e) => return Err(MetaError::UnknownError(e.to_string())),
@@ -259,10 +306,6 @@ impl CasFS {
         }
     }
 
-    fn get_bucket(&self, bucket_name: &str) -> Result<sled::Tree, MetaError> {
-        self.get_tree(bucket_name)
-    }
-
     // Open the tree containing the path map.
     fn sled_path_tree(&self) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(PATH_TREE)
@@ -276,6 +319,10 @@ impl CasFS {
     /// Open the tree containing the bucket metadata.
     fn sled_bucket_meta_tree(&self) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(BUCKET_META_TREE)
+    }
+
+    fn sled_bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
+        self.db.open_tree(bucket_name)
     }
 
     /// Remove a bucket and its associated metadata.
