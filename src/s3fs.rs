@@ -10,7 +10,7 @@ use tracing::error;
 use tracing::info;
 use uuid::Uuid;
 
-use s3_server::dto::ByteStream;
+use rusoto_core::ByteStream;
 use s3s::dto::StreamingBlob;
 use s3s::dto::Timestamp;
 use s3s::dto::{

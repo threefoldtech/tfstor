@@ -2628,6 +2628,7 @@ dependencies = [
  "openssl",
  "pin-project-lite 0.2.16",
  "prometheus",
+ "rusoto_core",
  "s3-server",
  "s3s",
  "s3s-aws",

@@ -43,6 +43,7 @@ hyper-util = { version = "0.1.9", features = [
     "http2",
     "tokio",
 ] }
+rusoto_core = "0.47.0"
 
 [profile.release]
 lto = true

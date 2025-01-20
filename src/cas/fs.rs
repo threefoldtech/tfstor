@@ -17,7 +17,7 @@ use futures::{
     stream::{StreamExt, TryStreamExt},
 };
 use md5::{Digest, Md5};
-use s3_server::dto::ByteStream;
+use rusoto_core::ByteStream;
 use sled::{Db, Transactional};
 use std::{
     convert::{TryFrom, TryInto},

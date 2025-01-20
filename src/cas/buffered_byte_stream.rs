@@ -1,6 +1,6 @@
 use super::fs::BLOCK_SIZE;
 use futures::{ready, Stream};
-use s3_server::dto::ByteStream;
+use rusoto_core::ByteStream;
 use std::{
     io, mem,
     pin::Pin,
