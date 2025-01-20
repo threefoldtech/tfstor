@@ -9,7 +9,6 @@ use super::{
     object::Object,
 };
 
-use chrono::Utc;
 use faster_hex::hex_string;
 use futures::{
     channel::mpsc::unbounded,
@@ -18,7 +17,7 @@ use futures::{
     stream::{StreamExt, TryStreamExt},
 };
 use md5::{Digest, Md5};
-use s3_server::dto::{Bucket, ByteStream};
+use s3_server::dto::ByteStream;
 use sled::{Db, Transactional};
 use std::{
     convert::{TryFrom, TryInto},
@@ -287,10 +286,7 @@ impl CasFS {
     pub fn create_bucket(&self, bucket_name: String) -> Result<(), MetaError> {
         let bucket_meta = self.get_tree(BUCKET_META_TREE)?;
 
-        let bm = Vec::from(&BucketMeta::new(
-            Utc::now().timestamp(),
-            bucket_name.clone(),
-        ));
+        let bm = BucketMeta::new(bucket_name.clone()).to_vec();
 
         match bucket_meta.insert(bucket_name, bm) {
             Ok(_) => Ok(()),
@@ -349,7 +345,7 @@ impl CasFS {
     }
 
     /// Get a list of all buckets in the system.
-    pub fn get_buckets(&self) -> Result<Vec<Bucket>, MetaError> {
+    pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         let bucket_tree = match self.sled_bucket_meta_tree() {
             Ok(t) => t,
             Err(e) => return Err(MetaError::UnknownError(e.to_string())),
@@ -364,7 +360,7 @@ impl CasFS {
                 };
                 // unwrap here is fine as it means the db is corrupt
                 let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
-                Some(bucket_meta.into())
+                Some(bucket_meta)
             })
             .collect();
         Ok(buckets)

@@ -406,12 +406,12 @@ impl S3 for S3FS {
         &self,
         _: S3Request<ListBucketsInput>,
     ) -> S3Result<S3Response<ListBucketsOutput>> {
-        let csfs_buckets = try_!(self.casfs.get_buckets());
+        let csfs_buckets = try_!(self.casfs.list_buckets());
         let mut buckets = Vec::with_capacity(csfs_buckets.len());
         for bucket in csfs_buckets {
             let bucket = Bucket {
-                creation_date: None, //creation_date: bucket.creation_date, TODO: fix it
-                name: bucket.name,
+                creation_date: Some(Timestamp::from(bucket.ctime())),
+                name: Some(bucket.name().into()),
             };
             buckets.push(bucket);
         }

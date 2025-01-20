@@ -1,7 +1,9 @@
 use super::{errors::FsError, fs::PTR_SIZE};
-use chrono::{SecondsFormat, TimeZone, Utc};
-use s3_server::dto::Bucket;
-use std::convert::{TryFrom, TryInto};
+use chrono::Utc;
+use std::{
+    convert::{TryFrom, TryInto},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Debug)]
 pub struct BucketMeta {
@@ -10,29 +12,23 @@ pub struct BucketMeta {
 }
 
 impl BucketMeta {
-    pub fn new(ctime: i64, name: String) -> Self {
-        Self { ctime, name }
+    pub fn new(name: String) -> Self {
+        Self {
+            ctime: Utc::now().timestamp(),
+            name,
+        }
     }
 
-    pub fn ctime(&self) -> i64 {
-        self.ctime
+    pub fn ctime(&self) -> SystemTime {
+        UNIX_EPOCH + std::time::Duration::from_secs(self.ctime as u64)
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
-}
 
-impl From<BucketMeta> for Bucket {
-    fn from(bm: BucketMeta) -> Self {
-        Bucket {
-            creation_date: Some(
-                Utc.timestamp_opt(bm.ctime, 0)
-                    .unwrap()
-                    .to_rfc3339_opts(SecondsFormat::Secs, true),
-            ),
-            name: Some(bm.name),
-        }
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.into()
     }
 }
 
