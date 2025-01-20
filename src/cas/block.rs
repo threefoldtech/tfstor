@@ -14,7 +14,6 @@ pub type BlockID = [u8; BLOCKID_SIZE]; // Size of an md5 hash
 pub struct Block {
     size: usize,
     path: Vec<u8>,
-    #[cfg(feature = "refcount")]
     rc: usize,
 }
 
@@ -22,15 +21,11 @@ impl From<&Block> for Vec<u8> {
     fn from(b: &Block) -> Self {
         // NOTE: we encode the lenght of the vector as a single byte, since it can only be 16 bytes
         // long.
-        #[cfg(not(feature = "refcount"))]
-        let mut out = Vec::with_capacity(PTR_SIZE + b.path.len() + 1);
-        #[cfg(feature = "refcount")]
         let mut out = Vec::with_capacity(2 * PTR_SIZE + b.path.len() + 1);
 
         out.extend_from_slice(&b.size.to_le_bytes());
         out.extend_from_slice(&(b.path.len() as u8).to_le_bytes());
         out.extend_from_slice(&b.path);
-        #[cfg(feature = "refcount")]
         out.extend_from_slice(&b.rc.to_le_bytes());
         out
     }
@@ -52,12 +47,6 @@ impl TryFrom<&[u8]> for Block {
         }
         let path = value[PTR_SIZE + 1..PTR_SIZE + 1 + vec_size].to_vec();
 
-        #[cfg(not(feature = "refcount"))]
-        if value.len() != PTR_SIZE + 1 + vec_size {
-            return Err(FsError::MalformedObject);
-        }
-
-        #[cfg(feature = "refcount")]
         if value.len() != PTR_SIZE * 2 + 1 + vec_size {
             return Err(FsError::MalformedObject);
         }
@@ -65,7 +54,6 @@ impl TryFrom<&[u8]> for Block {
         Ok(Block {
             size,
             path,
-            #[cfg(feature = "refcount")]
             rc: usize::from_le_bytes(value[PTR_SIZE + 1 + vec_size..].try_into().unwrap()),
         })
     }
@@ -73,12 +61,7 @@ impl TryFrom<&[u8]> for Block {
 
 impl Block {
     pub fn new(size: usize, path: Vec<u8>) -> Self {
-        Self {
-            size,
-            path,
-            #[cfg(feature = "refcount")]
-            rc: 1,
-        }
+        Self { size, path, rc: 1 }
     }
 
     pub fn size(&self) -> usize {
@@ -102,17 +85,14 @@ impl Block {
         root
     }
 
-    #[cfg(feature = "refcount")]
     pub fn rc(&self) -> usize {
         self.rc
     }
 
-    #[cfg(feature = "refcount")]
     pub fn increment_refcount(&mut self) {
         self.rc += 1
     }
 
-    #[cfg(feature = "refcount")]
     pub fn decrement_refcount(&mut self) {
         self.rc -= 1
     }

@@ -25,16 +25,16 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            features: vendored,refcount
+            features: vendored
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-            features: vendored,refcount,asm
+            features: vendored,asm
           - target: x86_64-apple-darwin
             os: macos-latest
-            features: vendored,refcount,asm
+            features: vendored,asm
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
-            features: vendored,refcount
+            features: vendored
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

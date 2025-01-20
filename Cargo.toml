@@ -10,7 +10,6 @@ description = "An experimental S3 server using a cas storage layer"
 [features]
 default = []
 vendored = ["openssl"]
-refcount = []
 asm = ["md-5/asm"]
 
 

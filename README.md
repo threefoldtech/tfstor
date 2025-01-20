@@ -3,17 +3,19 @@
 A simple POC implementation of the (basic) S3 API using content addresses storage. The current implementation
 has been running in production for 1.5 years storing some 250M objects.
 
+There is also `refcount` feature which adds reference counting to data blocks.
+With this feature, the data blocks will be deleted when they aren't used anymore.
+
+
 ## Building
 
 To build it yourself, clone the repo and then use the standard rust tools.
-There is also an optional `refcount` feature which adds reference counting to data blocks.
-If this feature is not enabled, data blocks will never be deleted (even if they) aren't used anymore.
 The `vendored` feature can be used if a static binary is needed.
 
 ```
 git clone https://github.com/leesmet/s3-cas
 cd s3-cas
-cargo build --release --features binary,refcount
+cargo build --release --features binary
 ```
 
 ## Known issues
