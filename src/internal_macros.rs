@@ -94,27 +94,6 @@ macro_rules! try_ {
     };
 }
 
-/// Create a `S3Error` with code and message
-macro_rules! code_error {
-    ($code:ident, $msg:expr $(, $source:expr)?) => {
-        code_error!(code = s3_server::errors::S3ErrorCode::$code, $msg $(, $source)?)
-    };
-    (code = $code:expr, $msg:expr $(, $source:expr)?) => {{
-        let code = $code;
-        let err = s3_server::errors::S3Error::from_code(code).message($msg);
-
-        $(let err = err.source($source);)?
-
-        let err = err.finish();
-
-        //tracing::debug!(
-        //    "generated s3 error: {}", err
-        //);
-
-        err
-    }};
-}
-
 /// Create a `NotSupported` error
 macro_rules! not_supported {
     ($msg:expr) => {{
@@ -135,22 +114,5 @@ macro_rules! signature_mismatch {
             SignatureDoesNotMatch,
             "The request signature we calculated does not match the signature you provided."
         )
-    }};
-}
-
-macro_rules! internal_error {
-    ($e:expr) => {{
-        let code = s3_server::errors::S3ErrorCode::InternalError;
-        let err = s3_server::errors::S3Error::from_code(code)
-            .message("We encountered an internal error. Please try again.")
-            .source($e)
-            .capture_backtrace()
-            .capture_span_trace()
-            .finish();
-
-        eprintln!("generated internal error: {}", err);
-        // tracing::error!("generated internal error: {}", err);
-
-        err
     }};
 }

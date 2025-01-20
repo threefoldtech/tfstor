@@ -3,7 +3,9 @@ use prometheus::{
     register_int_counter, register_int_counter_vec, register_int_gauge, IntCounter, IntCounterVec,
     IntGauge,
 };
-use s3_server::S3Storage;
+use s3s::dto::*;
+use s3s::S3;
+use s3s::{S3Request, S3Response, S3Result};
 use std::{ops::Deref, sync::Arc};
 
 const S3_API_METHODS: &[&str] = &[
@@ -215,183 +217,135 @@ impl<T> MetricFs<T> {
 }
 
 #[async_trait]
-impl<T> S3Storage for MetricFs<T>
+impl<T> S3 for MetricFs<T>
 where
-    T: S3Storage + Sync + Send,
+    T: S3 + Sync + Send,
 {
     async fn complete_multipart_upload(
         &self,
-        input: s3_server::dto::CompleteMultipartUploadRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::CompleteMultipartUploadOutput,
-        s3_server::dto::CompleteMultipartUploadError,
-    > {
+        req: S3Request<CompleteMultipartUploadInput>,
+    ) -> S3Result<S3Response<CompleteMultipartUploadOutput>> {
         self.metrics.add_method_call("complete_multipart_upload");
-        self.storage.complete_multipart_upload(input).await
+        self.storage.complete_multipart_upload(req).await
     }
 
     async fn copy_object(
         &self,
-        input: s3_server::dto::CopyObjectRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::CopyObjectOutput,
-        s3_server::dto::CopyObjectError,
-    > {
+        req: S3Request<CopyObjectInput>,
+    ) -> S3Result<S3Response<CopyObjectOutput>> {
         self.metrics.add_method_call("copy_object");
-        self.storage.copy_object(input).await
+        self.storage.copy_object(req).await
     }
 
     async fn create_multipart_upload(
         &self,
-        input: s3_server::dto::CreateMultipartUploadRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::CreateMultipartUploadOutput,
-        s3_server::dto::CreateMultipartUploadError,
-    > {
+        req: S3Request<CreateMultipartUploadInput>,
+    ) -> S3Result<S3Response<CreateMultipartUploadOutput>> {
         self.metrics.add_method_call("create_multipart_upload");
-        self.storage.create_multipart_upload(input).await
+        self.storage.create_multipart_upload(req).await
     }
 
     async fn create_bucket(
         &self,
-        input: s3_server::dto::CreateBucketRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::CreateBucketOutput,
-        s3_server::dto::CreateBucketError,
-    > {
+        req: S3Request<CreateBucketInput>,
+    ) -> S3Result<S3Response<CreateBucketOutput>> {
         self.metrics.add_method_call("create_bucket");
-        self.storage.create_bucket(input).await
+        self.storage.create_bucket(req).await
     }
 
     async fn delete_bucket(
         &self,
-        input: s3_server::dto::DeleteBucketRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::DeleteBucketOutput,
-        s3_server::dto::DeleteBucketError,
-    > {
+        req: S3Request<DeleteBucketInput>,
+    ) -> S3Result<S3Response<DeleteBucketOutput>> {
         self.metrics.add_method_call("delete_bucket");
-        self.storage.delete_bucket(input).await
+        self.storage.delete_bucket(req).await
     }
 
     async fn delete_object(
         &self,
-        input: s3_server::dto::DeleteObjectRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::DeleteObjectOutput,
-        s3_server::dto::DeleteObjectError,
-    > {
+        req: S3Request<DeleteObjectInput>,
+    ) -> S3Result<S3Response<DeleteObjectOutput>> {
         self.metrics.add_method_call("delete_object");
-        self.storage.delete_object(input).await
+        self.storage.delete_object(req).await
     }
 
     async fn delete_objects(
         &self,
-        input: s3_server::dto::DeleteObjectsRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::DeleteObjectsOutput,
-        s3_server::dto::DeleteObjectsError,
-    > {
+        req: S3Request<DeleteObjectsInput>,
+    ) -> S3Result<S3Response<DeleteObjectsOutput>> {
         self.metrics.add_method_call("delete_objects");
-        self.storage.delete_objects(input).await
+        self.storage.delete_objects(req).await
     }
 
     async fn get_bucket_location(
         &self,
-        input: s3_server::dto::GetBucketLocationRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::GetBucketLocationOutput,
-        s3_server::dto::GetBucketLocationError,
-    > {
+        req: S3Request<GetBucketLocationInput>,
+    ) -> S3Result<S3Response<GetBucketLocationOutput>> {
         self.metrics.add_method_call("get_bucket_location");
-        self.storage.get_bucket_location(input).await
+        self.storage.get_bucket_location(req).await
     }
 
     async fn get_object(
         &self,
-        input: s3_server::dto::GetObjectRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::GetObjectOutput,
-        s3_server::dto::GetObjectError,
-    > {
+        req: S3Request<GetObjectInput>,
+    ) -> S3Result<S3Response<GetObjectOutput>> {
         self.metrics.add_method_call("get_object");
-        self.storage.get_object(input).await
+        self.storage.get_object(req).await
     }
 
     async fn head_bucket(
         &self,
-        input: s3_server::dto::HeadBucketRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::HeadBucketOutput,
-        s3_server::dto::HeadBucketError,
-    > {
+        req: S3Request<HeadBucketInput>,
+    ) -> S3Result<S3Response<HeadBucketOutput>> {
         self.metrics.add_method_call("head_bucket");
-        self.storage.head_bucket(input).await
+        self.storage.head_bucket(req).await
     }
 
     async fn head_object(
         &self,
-        input: s3_server::dto::HeadObjectRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::HeadObjectOutput,
-        s3_server::dto::HeadObjectError,
-    > {
+        req: S3Request<HeadObjectInput>,
+    ) -> S3Result<S3Response<HeadObjectOutput>> {
         self.metrics.add_method_call("head_object");
-        self.storage.head_object(input).await
+        self.storage.head_object(req).await
     }
 
     async fn list_buckets(
         &self,
-        input: s3_server::dto::ListBucketsRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::ListBucketsOutput,
-        s3_server::dto::ListBucketsError,
-    > {
+        req: S3Request<ListBucketsInput>,
+    ) -> S3Result<S3Response<ListBucketsOutput>> {
         self.metrics.add_method_call("list_buckets");
-        self.storage.list_buckets(input).await
+        self.storage.list_buckets(req).await
     }
 
     async fn list_objects(
         &self,
-        input: s3_server::dto::ListObjectsRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::ListObjectsOutput,
-        s3_server::dto::ListObjectsError,
-    > {
+        req: S3Request<ListObjectsInput>,
+    ) -> S3Result<S3Response<ListObjectsOutput>> {
         self.metrics.add_method_call("list_objects");
-        self.storage.list_objects(input).await
+        self.storage.list_objects(req).await
     }
 
     async fn list_objects_v2(
         &self,
-        input: s3_server::dto::ListObjectsV2Request,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::ListObjectsV2Output,
-        s3_server::dto::ListObjectsV2Error,
-    > {
+        req: S3Request<ListObjectsV2Input>,
+    ) -> S3Result<S3Response<ListObjectsV2Output>> {
         self.metrics.add_method_call("list_objects_v2");
-        self.storage.list_objects_v2(input).await
+        self.storage.list_objects_v2(req).await
     }
 
     async fn put_object(
         &self,
-        input: s3_server::dto::PutObjectRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::PutObjectOutput,
-        s3_server::dto::PutObjectError,
-    > {
+        req: S3Request<PutObjectInput>,
+    ) -> S3Result<S3Response<PutObjectOutput>> {
         self.metrics.add_method_call("put_object");
-        self.storage.put_object(input).await
+        self.storage.put_object(req).await
     }
 
     async fn upload_part(
         &self,
-        input: s3_server::dto::UploadPartRequest,
-    ) -> s3_server::errors::S3StorageResult<
-        s3_server::dto::UploadPartOutput,
-        s3_server::dto::UploadPartError,
-    > {
+        req: S3Request<UploadPartInput>,
+    ) -> S3Result<S3Response<UploadPartOutput>> {
         self.metrics.add_method_call("upload_part");
-        self.storage.upload_part(input).await
+        self.storage.upload_part(req).await
     }
 }

@@ -120,6 +120,7 @@ impl MetaTree {
         Self { tree }
     }
 
+    // insert a key value pair into the tree
     pub fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), MetaError> {
         match self.tree.insert(key, value) {
             Ok(_) => Ok(()),
@@ -127,6 +128,7 @@ impl MetaTree {
         }
     }
 
+    // remove a key from the tree
     pub fn remove(&self, key: String) -> Result<(), MetaError> {
         match self.tree.remove(key) {
             Ok(_) => Ok(()),

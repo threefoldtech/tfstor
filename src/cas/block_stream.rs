@@ -1,8 +1,8 @@
 use crate::metrics::SharedMetrics;
 
 use super::range_request::RangeRequest;
+use bytes::Bytes;
 use futures::{ready, AsyncRead, AsyncSeek, Future, Stream};
-use hyper::body::Bytes;
 use std::{
     io,
     path::PathBuf,

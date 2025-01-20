@@ -15,17 +15,13 @@ asm = ["md-5/asm"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-# s3-server = "0.1"
-s3-server = { git = "https://github.com/LeeSmet/s3-server" }
 sled = "0.34"
 async-trait = "0.1"
 md-5 = { version = "0.10.6" }
-hyper = { version = "0.14.7", features = ["server"] }
-pin-project-lite = "0.2"
 futures = "0.3"
 async-fs = "1.5"
 faster-hex = "0.10.0"
-uuid = { version = "1.11.1", features = ["v4"] }
+uuid = { version = "1.12.0", features = ["v4"] }
 chrono = "0.4"
 structopt = { version = "0.3.26" }
 anyhow = { version = "1.0.95" }
