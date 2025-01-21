@@ -5,11 +5,20 @@ use sled;
 
 use super::{
     block::Block,
+    bucket_meta::BucketMeta,
     meta_errors::MetaError,
     meta_store::{BaseMetaTree, MetaStore, MetaTree, MetaTreeExt},
     multipart::MultiPart,
     object::Object,
 };
+
+impl From<sled::Error> for MetaError {
+    fn from(error: sled::Error) -> Self {
+        MetaError::UnknownError(error.to_string())
+    }
+}
+
+const BUCKET_META_TREE: &str = "_BUCKETS";
 
 #[derive(Debug)]
 pub struct SledStore {
@@ -21,9 +30,9 @@ impl SledStore {
         Self { db }
     }
 
-    fn get_tree(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
+    fn get_tree(&self, name: &str) -> Result<sled::Tree, MetaError> {
         match self.db.open_tree(name) {
-            Ok(tree) => Ok(Box::new(SledTree::new(tree))),
+            Ok(tree) => Ok(tree),
             Err(e) => Err(MetaError::UnknownError(e.to_string())),
         }
     }
@@ -36,8 +45,85 @@ impl MetaStore for SledStore {
             Err(e) => Err(MetaError::UnknownError(e.to_string())),
         }
     }
+
     fn get_tree(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
-        self.get_tree(name)
+        let tree = self.get_tree(name)?;
+        Ok(Box::new(SledTree::new(tree)))
+    }
+
+    /// drop_tree drops the tree with the given name.
+    fn drop_tree(&self, name: &str) -> Result<(), MetaError> {
+        match self.db.drop_tree(name) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    fn insert_bucket(&self, bucket_name: String, bm: BucketMeta) -> Result<(), MetaError> {
+        let raw_bm = bm.to_vec();
+
+        let bucket_meta = self.get_tree(BUCKET_META_TREE)?;
+        match bucket_meta.insert(bucket_name, raw_bm) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
+        let tree = self.get_tree(BUCKET_META_TREE)?;
+        match tree.contains_key(bucket_name) {
+            Ok(true) => Ok(true),
+            Ok(false) => Ok(false),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    fn insert_meta_obj(
+        &self,
+        bucket_name: &str,
+        key: &str,
+        obj_meta: Object,
+    ) -> Result<Object, MetaError> {
+        let bucket = self.get_tree(bucket_name)?;
+
+        match bucket.insert(key.as_bytes(), obj_meta.to_vec()) {
+            Ok(_) => Ok(obj_meta),
+            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        }
+    }
+
+    fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
+        let bucket = self.get_tree(bucket)?;
+        let object = match bucket.get(key) {
+            Ok(o) => o,
+            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+        };
+        match object {
+            Some(o) => Ok(Object::try_from(&*o).expect("Malformed object")),
+            None => Err(MetaError::KeyNotFound),
+        }
+    }
+
+    /// Get a list of all buckets in the system.
+    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
+        let bucket_tree = match self.get_tree(BUCKET_META_TREE) {
+            Ok(t) => t,
+            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+        };
+        let buckets = bucket_tree
+            .scan_prefix([])
+            .values()
+            .filter_map(|raw_value| {
+                let value = match raw_value {
+                    Err(_) => return None,
+                    Ok(v) => v,
+                };
+                // unwrap here is fine as it means the db is corrupt
+                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
+                Some(bucket_meta)
+            })
+            .collect();
+        Ok(buckets)
     }
 }
 
@@ -84,16 +170,9 @@ impl BaseMetaTree for SledTree {
     }
 
     fn get_multipart_part_obj(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
-        let part_data_enc = self.get(key)?;
-        let part_data_enc = match part_data_enc {
-            Some(pde) => pde,
-            None => {
-                return Err(MetaError::KeyNotFound);
-            }
-        };
-
+        let part_data = self.get(key)?.ok_or(MetaError::KeyNotFound)?;
         // unwrap here is safe as it is a coding error
-        let mp = MultiPart::try_from(&*part_data_enc).expect("Corrupted multipart data");
+        let mp = MultiPart::try_from(&*part_data).expect("Corrupted multipart data");
         Ok(mp)
     }
 }

@@ -9,5 +9,5 @@ mod buffered_byte_stream;
 mod errors;
 mod fs;
 pub mod meta_errors;
-mod object;
+pub mod object;
 mod sled_store;

@@ -95,11 +95,6 @@ impl CasFS {
         }
     }
 
-    //pub fn get_bucket(&self, bucket_name: &str) -> Result<MetaTree, MetaError> {
-    //    let tree = self.get_tree(bucket_name)?;
-    //    Ok(MetaTree::new(tree))
-    //}
-
     pub fn get_bucket(
         &self,
         bucket_name: &str,
@@ -118,16 +113,11 @@ impl CasFS {
 
     /// Check if a bucket with a given name exists.
     pub fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-        let tree = self.get_tree(BUCKET_META_TREE)?;
-        match tree.contains_key(bucket_name) {
-            Ok(true) => Ok(true),
-            Ok(false) => Ok(false),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
+        self.meta_store.bucket_exists(bucket_name)
     }
 
     // create a meta object and insert it into the database
-    pub fn create_insert_meta(
+    pub fn create_object_meta(
         &self,
         bucket_name: &str,
         key: &str,
@@ -137,49 +127,18 @@ impl CasFS {
         blocks: Vec<BlockID>,
     ) -> Result<Object, MetaError> {
         let obj_meta = Object::new(size, e_tag, parts, blocks);
-
-        let bucket = self.get_tree(bucket_name)?;
-
-        match bucket.insert(key, obj_meta.to_vec()) {
-            Ok(_) => Ok(obj_meta),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
+        self.meta_store.insert_meta_obj(bucket_name, key, obj_meta)
     }
 
     // get meta object from the DB
     pub fn get_object_meta(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
-        let bucket = self.get_tree(bucket)?;
-        let object = match bucket.get(key) {
-            Ok(o) => o,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
-        };
-        match object {
-            Some(o) => Ok(Object::try_from(&*o).expect("Malformed object")),
-            None => Err(MetaError::KeyNotFound),
-        }
+        self.meta_store.get_meta_obj(bucket, key)
     }
 
     // create and insert a new  bucket
     pub fn create_bucket(&self, bucket_name: String) -> Result<(), MetaError> {
-        let bucket_meta = self.get_tree(BUCKET_META_TREE)?;
-
-        let bm = BucketMeta::new(bucket_name.clone()).to_vec();
-
-        match bucket_meta.insert(bucket_name, bm) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
-    }
-
-    /// Open the tree containing the objects in a bucket.
-    fn get_tree(&self, bucket_name: &str) -> Result<sled::Tree, MetaError> {
-        match self.db.open_tree(bucket_name) {
-            Ok(tree) => Ok(tree),
-            Err(e) => match e {
-                sled::Error::CollectionNotFound(_) => Err(MetaError::CollectionNotFound),
-                _ => Err(MetaError::UnknownError(e.to_string())),
-            },
-        }
+        let bm = BucketMeta::new(bucket_name.clone());
+        self.meta_store.insert_bucket(bucket_name, bm)
     }
 
     // Open the tree containing the path map.
@@ -192,53 +151,33 @@ impl CasFS {
         self.db.open_tree(BLOCK_TREE)
     }
 
-    /// Open the tree containing the bucket metadata.
-    fn sled_bucket_meta_tree(&self) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(BUCKET_META_TREE)
-    }
-
     fn sled_bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
         self.db.open_tree(bucket_name)
     }
 
     /// Remove a bucket and its associated metadata.
     // TODO: this is very much not optimal
-    pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), sled::Error> {
-        let bmt = self.sled_bucket_meta_tree()?;
-        bmt.remove(bucket_name)?;
+    pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
+        let bmt = self.meta_store.get_base_tree(BUCKET_META_TREE)?;
+        bmt.remove(bucket_name.as_bytes())?;
         let bucket = self.sled_bucket(bucket_name)?;
+
         for key in bucket.iter().keys() {
+            let key = key?;
             self.delete_object(
                 bucket_name,
-                std::str::from_utf8(&key?).expect("keys are valid utf-8"),
+                std::str::from_utf8(&key).expect("keys are valid utf-8"),
             )
             .await?;
         }
 
-        self.db.drop_tree(bucket_name)?;
+        self.meta_store.drop_tree(bucket_name)?;
         Ok(())
     }
 
     /// Get a list of all buckets in the system.
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        let bucket_tree = match self.sled_bucket_meta_tree() {
-            Ok(t) => t,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
-        };
-        let buckets = bucket_tree
-            .scan_prefix([])
-            .values()
-            .filter_map(|raw_value| {
-                let value = match raw_value {
-                    Err(_) => return None,
-                    Ok(v) => v,
-                };
-                // unwrap here is fine as it means the db is corrupt
-                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
-                Some(bucket_meta)
-            })
-            .collect();
-        Ok(buckets)
+        self.meta_store.list_buckets()
     }
 
     /// Delete an object from a bucket.

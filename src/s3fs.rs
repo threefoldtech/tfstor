@@ -132,7 +132,7 @@ impl S3 for S3FS {
         }
         let e_tag = hasher.finalize().into();
 
-        let object_meta = try_!(self.casfs.create_insert_meta(
+        let object_meta = try_!(self.casfs.create_object_meta(
             &bucket,
             &key,
             size as u64,
@@ -599,7 +599,7 @@ impl S3 for S3FS {
 
         let obj_meta = try_!(self
             .casfs
-            .create_insert_meta(&bucket, &key, size, hash, 0, blocks));
+            .create_object_meta(&bucket, &key, size, hash, 0, blocks));
 
         let output = PutObjectOutput {
             e_tag: Some(obj_meta.format_e_tag()),
