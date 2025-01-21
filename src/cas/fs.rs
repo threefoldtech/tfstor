@@ -1,13 +1,13 @@
-use crate::metrics::SharedMetrics;
-use std::ops::Deref;
-
 use super::{
     block::{Block, BlockID, BLOCKID_SIZE},
     bucket_meta::BucketMeta,
     buffered_byte_stream::BufferedByteStream,
-    multipart::MultiPart,
+    meta_errors::MetaError,
+    meta_store,
     object::Object,
+    sled_store,
 };
+use crate::metrics::SharedMetrics;
 
 use faster_hex::hex_string;
 use futures::{
@@ -32,13 +32,6 @@ const BLOCK_TREE: &str = "_BLOCKS";
 const PATH_TREE: &str = "_PATHS";
 const MULTIPART_TREE: &str = "_MULTIPART_PARTS";
 pub const PTR_SIZE: usize = mem::size_of::<usize>(); // Size of a `usize` in bytes
-
-#[derive(Debug)]
-pub struct CasFS {
-    db: Db,
-    root: PathBuf,
-    metrics: SharedMetrics,
-}
 
 struct PendingMarker {
     metrics: SharedMetrics,
@@ -79,139 +72,12 @@ impl Drop for PendingMarker {
     }
 }
 
-use std::error::Error;
-use std::fmt;
-
-// Define the error type
 #[derive(Debug)]
-pub enum MetaError {
-    KeyNotFound,
-    KeyAlreadyExists,
-    CollectionNotFound,
-    BucketNotFound,
-    UnknownError(String),
-}
-
-// Implement the std::error::Error trait
-impl Error for MetaError {}
-
-// Implement the Display trait for custom error messages
-impl fmt::Display for MetaError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            MetaError::KeyNotFound => write!(f, "Key not found"),
-            MetaError::KeyAlreadyExists => write!(f, "Key already exists"),
-            MetaError::CollectionNotFound => write!(f, "Collection not found"),
-            MetaError::BucketNotFound => write!(f, "Bucket not found"),
-            MetaError::UnknownError(ref s) => write!(f, "Unknown error: {}", s),
-        }
-    }
-}
-
-/// MetaTree is a wrapper around a sled::Tree that provides a higher level API for interacting with
-/// TODO: it should be part of the meta's `Object` struct
-#[derive(Clone)]
-pub struct MetaTree {
-    tree: sled::Tree,
-}
-
-impl MetaTree {
-    fn new(tree: sled::Tree) -> Self {
-        Self { tree }
-    }
-
-    // insert a key value pair into the tree
-    pub fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), MetaError> {
-        match self.tree.insert(key, value) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
-    }
-
-    // remove a key from the tree
-    pub fn remove(&self, key: String) -> Result<(), MetaError> {
-        match self.tree.remove(key) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
-    }
-
-    pub fn create_block_obj<K: AsRef<[u8]>>(&self, key: K) -> Result<Block, MetaError> {
-        let block_data = self.get(key)?.ok_or(MetaError::KeyNotFound)?;
-        let block = match Block::try_from(&*block_data) {
-            Ok(b) => b,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
-        };
-        Ok(block)
-    }
-
-    pub fn create_multipart_part<K: AsRef<[u8]>>(&self, key: K) -> Result<MultiPart, MetaError> {
-        let part_data_enc = self.get(&key)?;
-        let part_data_enc = match part_data_enc {
-            Some(pde) => pde,
-            None => {
-                return Err(MetaError::KeyNotFound);
-            }
-        };
-
-        // unwrap here is safe as it is a coding error
-        let mp = MultiPart::try_from(&*part_data_enc).expect("Corrupted multipart data");
-        Ok(mp)
-    }
-
-    // TODO: merge this method with range_filter
-    pub fn range_filter_skip<'a>(
-        &self,
-        start_bytes: &'a [u8],
-        prefix_bytes: &'a [u8],
-        start_after: Option<String>,
-    ) -> impl Iterator<Item = (String, Object)> + 'a {
-        self.tree
-            .range(start_bytes..)
-            .filter_map(|read_result| match read_result {
-                Err(_) => None,
-                Ok((k, v)) => Some((k, v)),
-            })
-            .skip_while(move |(raw_key, _)| match start_after {
-                None => false,
-                Some(ref start_after) => raw_key.deref() <= start_after.as_bytes(),
-            })
-            .take_while(move |(raw_key, _)| raw_key.starts_with(prefix_bytes))
-            .map(|(raw_key, raw_value)| {
-                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
-                let obj = Object::try_from(&*raw_value).unwrap();
-                (key, obj)
-            })
-    }
-
-    // TODO: merge this method with range_filter_skip
-    pub fn range_filter<'a>(
-        &self,
-        start_bytes: &'a [u8],
-        prefix_bytes: &'a [u8],
-    ) -> impl Iterator<Item = (String, Object)> + 'a {
-        self.tree
-            .range(start_bytes..)
-            .filter_map(|read_result| match read_result {
-                Err(_) => None,
-                Ok((k, v)) => Some((k, v)),
-            })
-            .take_while(move |(raw_key, _)| raw_key.starts_with(prefix_bytes))
-            .map(|(raw_key, raw_value)| {
-                let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
-                let obj = Object::try_from(&*raw_value).unwrap();
-                (key, obj)
-            })
-    }
-
-    // get an object from the tree
-    fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<sled::IVec>, MetaError> {
-        match self.tree.get(key) {
-            Ok(Some(v)) => Ok(Some(v)),
-            Ok(None) => Ok(None),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
-    }
+pub struct CasFS {
+    db: Db,
+    meta_store: Box<dyn meta_store::MetaStore>,
+    root: PathBuf,
+    metrics: SharedMetrics,
 }
 
 impl CasFS {
@@ -221,24 +87,33 @@ impl CasFS {
         let db = sled::open(meta_path).unwrap();
         // Get the current amount of buckets
         metrics.set_bucket_count(db.open_tree(BUCKET_META_TREE).unwrap().len());
-        Self { db, root, metrics }
+        Self {
+            db: db.clone(),
+            meta_store: Box::new(sled_store::SledStore::new(db)),
+            root,
+            metrics,
+        }
     }
 
-    pub fn get_bucket(&self, bucket_name: &str) -> Result<MetaTree, MetaError> {
-        let tree = self.get_tree(bucket_name)?;
-        Ok(MetaTree::new(tree))
+    //pub fn get_bucket(&self, bucket_name: &str) -> Result<MetaTree, MetaError> {
+    //    let tree = self.get_tree(bucket_name)?;
+    //    Ok(MetaTree::new(tree))
+    //}
+
+    pub fn get_bucket(
+        &self,
+        bucket_name: &str,
+    ) -> Result<Box<dyn meta_store::MetaTree + Send + Sync>, MetaError> {
+        self.meta_store.get_tree(bucket_name)
     }
 
     /// Open the tree containing the block map.
-    pub fn block_tree(&self) -> Result<MetaTree, MetaError> {
-        //self.db.open_tree(BLOCK_TREE)
-        let tree = self.get_tree(BLOCK_TREE)?;
-        Ok(MetaTree::new(tree))
+    pub fn block_tree(&self) -> Result<Box<dyn meta_store::BaseMetaTree>, MetaError> {
+        self.meta_store.get_base_tree(BLOCK_TREE)
     }
 
-    pub fn multipart_tree(&self) -> Result<MetaTree, MetaError> {
-        let tree = self.get_tree(MULTIPART_TREE)?;
-        Ok(MetaTree::new(tree))
+    pub fn multipart_tree(&self) -> Result<Box<dyn meta_store::BaseMetaTree>, MetaError> {
+        self.meta_store.get_base_tree(MULTIPART_TREE)
     }
 
     /// Check if a bucket with a given name exists.

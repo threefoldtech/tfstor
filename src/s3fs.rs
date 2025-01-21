@@ -28,10 +28,9 @@ use s3s::S3Result;
 use s3s::S3;
 use s3s::{S3Request, S3Response};
 
-use crate::cas::block_stream::BlockStream;
-use crate::cas::multipart::MultiPart;
-use crate::cas::range_request::parse_range_request;
-use crate::cas::CasFS;
+use crate::cas::{
+    block_stream::BlockStream, multipart::MultiPart, range_request::parse_range_request, CasFS,
+};
 use crate::metrics::SharedMetrics;
 
 const MAX_KEYS: i32 = 1000;
@@ -109,7 +108,7 @@ impl S3 for S3FS {
             }
             let part_key = format!("{}-{}-{}-{}", &bucket, &key, &upload_id, part_number);
 
-            let mp = match multipart_map.create_multipart_part(&part_key) {
+            let mp = match multipart_map.get_multipart_part_obj(part_key.as_bytes()) {
                 Ok(mp) => mp,
                 Err(e) => {
                     error!("Missing part \"{}\" in multipart upload: {}", part_key, e);
@@ -125,10 +124,8 @@ impl S3 for S3FS {
         let mut size = 0;
         let block_map = try_!(self.casfs.block_tree());
         for block in &blocks {
-            //let bi = try_!(block_map.wek_get(block)).unwrap(); // unwrap is fine as all blocks in must be present
-            //let block_info = Block::try_from(&*bi).expect("Block data is corrupt");
             let block_info = block_map
-                .create_block_obj(block)
+                .get_block_obj(block)
                 .expect("Block data is corrupt");
             size += block_info.size();
             hasher.update(block);
@@ -154,7 +151,7 @@ impl S3 for S3FS {
                 part.part_number.unwrap()
             );
 
-            if let Err(e) = multipart_map.remove(part_key) {
+            if let Err(e) = multipart_map.remove(part_key.as_bytes()) {
                 error!("Could not remove part: {}", e);
             };
         }
@@ -321,12 +318,6 @@ impl S3 for S3FS {
         } = input;
 
         // load metadata
-        /*let bk = try_!(self.casfs.bucket(&bucket));
-        let obj = match try_!(bk.get(&key)) {
-            None => return Err(s3_error!(NoSuchKey, "The specified key does not exist")),
-            Some(obj) => obj,
-        };
-        let obj_meta = try_!(Object::try_from(&obj.to_vec()[..]));*/
         let obj_meta = try_!(self.casfs.get_object_meta(&bucket, &key));
 
         let e_tag = obj_meta.format_e_tag();
@@ -346,9 +337,7 @@ impl S3 for S3FS {
         for block in obj_meta.blocks() {
             // unwrap here is safe as we only add blocks to the list of an object if they are
             // corectly inserted in the block map
-            //let block_meta_enc = try_!(block_map.wek_get(block)).unwrap();
-            //let block_meta = try_!(Block::try_from(&*block_meta_enc));
-            let block_meta = try_!(block_map.create_block_obj(block));
+            let block_meta = try_!(block_map.get_block_obj(block));
             block_size += block_meta.size();
             paths.push((block_meta.disk_path(self.root.clone()), block_meta.size()));
         }
@@ -672,7 +661,7 @@ impl S3 for S3FS {
 
         let enc_mp = Vec::from(&mp);
 
-        try_!(mp_map.insert(storage_key.into(), enc_mp));
+        try_!(mp_map.insert(storage_key.as_bytes(), enc_mp));
 
         let output = UploadPartOutput {
             e_tag: Some(e_tag),
