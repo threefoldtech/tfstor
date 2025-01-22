@@ -178,6 +178,14 @@ impl BaseMetaTree for SledTree {
 }
 
 impl MetaTreeExt for SledTree {
+    fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send> {
+        Box::new(self.tree.iter().keys().map(|key_result| {
+            key_result
+                .map(|ivec| ivec.to_vec())
+                .map_err(|e| MetaError::UnknownError(e.to_string()))
+        }))
+    }
+
     fn range_filter_skip<'a>(
         &'a self,
         start_bytes: &'a [u8],

@@ -160,9 +160,9 @@ impl CasFS {
     pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
         let bmt = self.meta_store.get_base_tree(BUCKET_META_TREE)?;
         bmt.remove(bucket_name.as_bytes())?;
-        let bucket = self.sled_bucket(bucket_name)?;
+        let bucket = self.meta_store.get_tree(bucket_name)?;
 
-        for key in bucket.iter().keys() {
+        for key in bucket.get_bucket_keys() {
             let key = key?;
             self.delete_object(
                 bucket_name,
