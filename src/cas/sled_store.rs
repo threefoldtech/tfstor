@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::convert::TryFrom;
 use std::ops::Deref;
 
@@ -6,7 +7,7 @@ use sled;
 use sled::Transactional;
 
 use super::{
-    block::Block,
+    block::{Block, BlockID, BLOCKID_SIZE},
     bucket_meta::BucketMeta,
     meta_errors::MetaError,
     meta_store::{BaseMetaTree, MetaStore, MetaTree, MetaTreeExt},
@@ -183,6 +184,72 @@ impl MetaStore for SledStore {
         };
         Ok(blocks_to_delete)
     }
+
+    fn write_meta_for_block(
+        &self,
+        block_map: Box<dyn BaseMetaTree>,
+        path_map: Box<dyn BaseMetaTree>,
+        block_hash: BlockID,
+        data_len: usize,
+    ) -> Result<bool, MetaError> {
+        let block_map = convert_to_sled_tree(&block_map)
+            .ok_or_else(|| MetaError::NotMetaTree("block_map is not a sled tree".to_string()))?;
+        let path_map = convert_to_sled_tree(&path_map)
+            .ok_or_else(|| MetaError::NotMetaTree("path_map is not a sled tree".to_string()))?;
+
+        let block_map = &block_map.tree;
+        let path_map = &path_map.tree;
+
+        // Check if the hash is present in the block map. If it is not, try to find a path, and
+        // insert it.
+        let should_write: Result<bool, sled::transaction::TransactionError> = (block_map, path_map)
+            .transaction(|(blocks, paths)| {
+                match blocks.get(block_hash)? {
+                    Some(block_data) => {
+                        // Block already exists
+                        {
+                            // bump refcount on the block
+                            let mut block = Block::try_from(&*block_data)
+                                .expect("Only valid blocks are stored");
+                            block.increment_refcount();
+                            // write block back
+                            // TODO: this could be done in an `update_and_fetch`
+                            blocks.insert(&block_hash, Vec::from(&block))?;
+                        }
+
+                        Ok(false)
+                    }
+                    None => {
+                        // find a free path
+                        for index in 1..BLOCKID_SIZE {
+                            if paths.get(&block_hash[..index])?.is_some() {
+                                // path already used, try the next one
+                                continue;
+                            };
+
+                            // path is free, insert
+                            paths.insert(&block_hash[..index], &block_hash)?;
+
+                            let block = Block::new(data_len, block_hash[..index].to_vec());
+
+                            blocks.insert(&block_hash, Vec::from(&block))?;
+                            return Ok(true);
+                        }
+
+                        // The loop above can only NOT find a path in case it is duplicate
+                        // block, wich already breaks out at the start.
+                        unreachable!();
+                    }
+                }
+            });
+        match should_write {
+            Ok(b) => Ok(b),
+            Err(sled::transaction::TransactionError::Storage(e)) => {
+                Err(MetaError::TransactionError(e.to_string()))
+            }
+            Err(sled::transaction::TransactionError::Abort(_)) => unreachable!(),
+        }
+    }
 }
 
 pub struct SledTree {
@@ -204,6 +271,10 @@ impl SledTree {
 }
 
 impl BaseMetaTree for SledTree {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
         match self.tree.insert(key, value) {
             Ok(_) => Ok(()),
@@ -292,3 +363,7 @@ impl MetaTreeExt for SledTree {
 }
 
 impl MetaTree for SledTree {} // Empty impl as marker
+
+fn convert_to_sled_tree(tree: &dyn BaseMetaTree) -> Option<&SledTree> {
+    tree.as_any().downcast_ref::<SledTree>()
+}

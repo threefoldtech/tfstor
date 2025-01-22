@@ -1,5 +1,10 @@
+use std::any::Any;
+
 use super::{
-    block::Block, bucket_meta::BucketMeta, meta_errors::MetaError, multipart::MultiPart,
+    block::{Block, BlockID},
+    bucket_meta::BucketMeta,
+    meta_errors::MetaError,
+    multipart::MultiPart,
     object::Object,
 };
 use std::fmt::Debug;
@@ -38,9 +43,19 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// delete all objects in a bucket for the given key.
     /// it returns a list of blocks that were deleted.
     fn delete_objects(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError>;
+
+    fn write_meta_for_block(
+        &self,
+        block_map: Box<dyn BaseMetaTree>,
+        path_map: Box<dyn BaseMetaTree>,
+        block_hash: BlockID,
+        data_len: usize,
+    ) -> Result<bool, MetaError>;
 }
 
 pub trait BaseMetaTree: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
+
     /// insert inserts a key value pair into the tree.
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError>;
 
@@ -71,3 +86,46 @@ pub trait MetaTreeExt: BaseMetaTree {
 }
 
 pub trait MetaTree: BaseMetaTree + MetaTreeExt {}
+
+impl<T: ?Sized + BaseMetaTree> BaseMetaTree for Box<T> {
+    fn as_any(&self) -> &dyn Any {
+        (**self).as_any()
+    }
+
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
+        (**self).insert(key, value)
+    }
+
+    fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
+        (**self).remove(key)
+    }
+    fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError> {
+        (**self).get_block_obj(key)
+    }
+
+    fn get_multipart_part_obj(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
+        (**self).get_multipart_part_obj(key)
+    }
+}
+
+use std::sync::Arc;
+impl<T: ?Sized + BaseMetaTree> BaseMetaTree for Arc<T> {
+    fn as_any(&self) -> &dyn Any {
+        (**self).as_any()
+    }
+
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
+        (**self).insert(key, value)
+    }
+
+    fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
+        (**self).remove(key)
+    }
+
+    fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError> {
+        (**self).get_block_obj(key)
+    }
+    fn get_multipart_part_obj(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
+        (**self).get_multipart_part_obj(key)
+    }
+}

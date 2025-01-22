@@ -1,11 +1,9 @@
+use std::sync::Arc;
+use std::{io, mem, path::PathBuf};
+
 use super::{
-    block::{Block, BlockID, BLOCKID_SIZE},
-    bucket_meta::BucketMeta,
-    buffered_byte_stream::BufferedByteStream,
-    meta_errors::MetaError,
-    meta_store,
-    object::Object,
-    sled_store,
+    block::BlockID, bucket_meta::BucketMeta, buffered_byte_stream::BufferedByteStream,
+    meta_errors::MetaError, meta_store, object::Object, sled_store,
 };
 use crate::metrics::SharedMetrics;
 
@@ -18,12 +16,7 @@ use futures::{
 };
 use md5::{Digest, Md5};
 use rusoto_core::ByteStream;
-use sled::{Db, Transactional};
-use std::{
-    convert::{TryFrom, TryInto},
-    io, mem,
-    path::PathBuf,
-};
+
 use tracing::{error, info};
 
 pub const BLOCK_SIZE: usize = 1 << 20; // Supposedly 1 MiB
@@ -74,7 +67,6 @@ impl Drop for PendingMarker {
 
 #[derive(Debug)]
 pub struct CasFS {
-    db: Db,
     meta_store: Box<dyn meta_store::MetaStore>,
     root: PathBuf,
     metrics: SharedMetrics,
@@ -88,7 +80,6 @@ impl CasFS {
         // Get the current amount of buckets
         metrics.set_bucket_count(db.open_tree(BUCKET_META_TREE).unwrap().len());
         Self {
-            db: db.clone(),
             meta_store: Box::new(sled_store::SledStore::new(db)),
             root,
             metrics,
@@ -139,16 +130,6 @@ impl CasFS {
     pub fn create_bucket(&self, bucket_name: String) -> Result<(), MetaError> {
         let bm = BucketMeta::new(bucket_name.clone());
         self.meta_store.insert_bucket(bucket_name, bm)
-    }
-
-    // Open the tree containing the path map.
-    fn sled_path_tree(&self) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(PATH_TREE)
-    }
-
-    /// Open the tree containing the block map.
-    fn sled_block_tree(&self) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(BLOCK_TREE)
     }
 
     /// Remove a bucket and its associated metadata.
@@ -206,8 +187,8 @@ impl CasFS {
     /// Save data on the filesystem. A list of block ID's used as keys for the data blocks is
     /// returned, along with the hash of the full byte stream, and the length of the stream.
     pub async fn store_bytes(&self, data: ByteStream) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
-        let block_map = self.sled_block_tree()?;
-        let path_map = self.sled_path_tree()?;
+        let block_map = Arc::new(self.meta_store.get_base_tree(BLOCK_TREE)?);
+        let path_map = Arc::new(self.meta_store.get_base_tree(PATH_TREE)?);
         let (tx, rx) = unbounded();
         let mut content_hash = Md5::new();
         let data = BufferedByteStream::new(data);
@@ -225,7 +206,11 @@ impl CasFS {
                 self.metrics.bytes_received(bytes.len());
             }
         })
-        .zip(stream::repeat((tx, block_map, path_map)))
+        .zip(stream::repeat((
+            tx,
+            Arc::clone(&block_map),
+            Arc::clone(&path_map),
+        )))
         .enumerate()
         .for_each_concurrent(
             5,
@@ -248,50 +233,16 @@ impl CasFS {
 
                 // Check if the hash is present in the block map. If it is not, try to find a path, and
                 // insert it.
-                let should_write: Result<bool, sled::transaction::TransactionError> =
-                    (&block_map, &path_map).transaction(|(blocks, paths)| {
-                        match blocks.get(block_hash)? {
-                            Some(block_data) => {
-                                // Block already exists
-                                {
-                                    // bump refcount on the block
-                                    let mut block = Block::try_from(&*block_data)
-                                        .expect("Only valid blocks are stored");
-                                    block.increment_refcount();
-                                    // write block back
-                                    // TODO: this could be done in an `update_and_fetch`
-                                    blocks.insert(&block_hash, Vec::from(&block))?;
-                                }
-
-                                Ok(false)
-                            }
-                            None => {
-                                // find a free path
-                                for index in 1..BLOCKID_SIZE {
-                                    if paths.get(&block_hash[..index])?.is_some() {
-                                        // path already used, try the next one
-                                        continue;
-                                    };
-
-                                    // path is free, insert
-                                    paths.insert(&block_hash[..index], &block_hash)?;
-
-                                    let block = Block::new(data_len, block_hash[..index].to_vec());
-
-                                    blocks.insert(&block_hash, Vec::from(&block))?;
-                                    return Ok(true);
-                                }
-
-                                // The loop above can only NOT find a path in case it is duplicate
-                                // block, wich already breaks out at the start.
-                                unreachable!();
-                            }
-                        }
-                    });
+                let should_write = self.meta_store.write_meta_for_block(
+                    Box::new(block_map.clone()),
+                    Box::new(path_map.clone()),
+                    block_hash,
+                    data_len,
+                );
 
                 let mut pm = PendingMarker::new(self.metrics.clone());
                 match should_write {
-                    Err(sled::transaction::TransactionError::Storage(e)) => {
+                    Err(e) => {
                         if let Err(e) = tx.send(Err(e.into())).await {
                             eprintln!("Could not send transaction error: {}", e);
                         }
@@ -305,22 +256,16 @@ impl CasFS {
                         return;
                     }
                     Ok(true) => pm.block_pending(),
-                    // We don't abort manually so this can't happen
-                    Err(sled::transaction::TransactionError::Abort(_)) => unreachable!(),
                 };
 
                 // write the actual block
                 // first load the block again from the DB
-                let block: Block = match block_map.get(block_hash) {
-                    Ok(Some(encoded_block)) => (&*encoded_block)
-                        .try_into()
-                        .expect("Block data is corrupted"),
-                    // we just inserted this block, so this is by definition impossible
-                    Ok(None) => unreachable!(),
+                let block = match block_map.get_block_obj(&block_hash) {
+                    Ok(block) => block,
                     Err(e) => {
                         if let Err(e) = tx.send(Err(e.into())).await {
                             pm.block_write_error();
-                            eprintln!("Could not send db error: {}", e);
+                            error!("Could not send db error: {}", e);
                         }
                         return;
                     }

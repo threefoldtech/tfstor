@@ -8,6 +8,8 @@ pub enum MetaError {
     KeyAlreadyExists,
     CollectionNotFound,
     BucketNotFound,
+    NotMetaTree(String),
+    TransactionError(String),
     UnknownError(String),
 }
 
@@ -22,7 +24,17 @@ impl fmt::Display for MetaError {
             MetaError::KeyAlreadyExists => write!(f, "Key already exists"),
             MetaError::CollectionNotFound => write!(f, "Collection not found"),
             MetaError::BucketNotFound => write!(f, "Bucket not found"),
+            MetaError::NotMetaTree(ref s) => write!(f, "Not a meta tree: {}", s),
+            MetaError::TransactionError(ref s) => write!(f, "Transaction error: {}", s),
             MetaError::UnknownError(ref s) => write!(f, "Unknown error: {}", s),
         }
+    }
+}
+
+use std::io;
+
+impl From<MetaError> for io::Error {
+    fn from(error: MetaError) -> Self {
+        io::Error::new(io::ErrorKind::Other, error.to_string())
     }
 }
