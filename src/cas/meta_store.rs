@@ -34,6 +34,10 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
+
+    /// delete all objects in a bucket for the given key.
+    /// it returns a list of blocks that were deleted.
+    fn delete_objects(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError>;
 }
 
 pub trait BaseMetaTree: Send + Sync {

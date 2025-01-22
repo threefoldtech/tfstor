@@ -19,9 +19,9 @@ sled = "0.34"
 async-trait = "0.1"
 md-5 = { version = "0.10.6" }
 futures = "0.3"
-async-fs = "1.5"
+async-fs = "2.1"
 faster-hex = "0.10.0"
-uuid = { version = "1.12.0", features = ["v4"] }
+uuid = { version = "1.12", features = ["v4"] }
 chrono = "0.4"
 structopt = { version = "0.3.26" }
 anyhow = { version = "1.0.95" }
@@ -39,7 +39,7 @@ hyper-util = { version = "0.1.9", features = [
     "http2",
     "tokio",
 ] }
-rusoto_core = "0.47.0"
+rusoto_core = "0.48.0"
 
 [profile.release]
 lto = true
@@ -47,10 +47,7 @@ codegen-units = 1
 
 [dev-dependencies]
 s3s-aws = { git = "https://github.com/Nugine/s3s", package = "s3s-aws" }
-anyhow = { version = "1.0.89", features = ["backtrace"] }
 aws-config = { version = "1.5.8", default-features = false }
 aws-credential-types = { version = "1.2.1", features = ["test-util"] }
 aws-sdk-s3 = { version = "1.56.0", features = ["behavior-version-latest"] }
 once_cell = "1.20.2"
-tokio = { version = "1.40.0", features = ["full"] }
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "time"] }

@@ -24,7 +24,7 @@ use std::{
     io, mem,
     path::PathBuf,
 };
-use tracing::info;
+use tracing::{error, info};
 
 pub const BLOCK_SIZE: usize = 1 << 20; // Supposedly 1 MiB
 const BUCKET_META_TREE: &str = "_BUCKETS";
@@ -151,10 +151,6 @@ impl CasFS {
         self.db.open_tree(BLOCK_TREE)
     }
 
-    fn sled_bucket(&self, bucket_name: &str) -> Result<sled::Tree, sled::Error> {
-        self.db.open_tree(bucket_name)
-    }
-
     /// Remove a bucket and its associated metadata.
     // TODO: this is very much not optimal
     pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
@@ -181,62 +177,11 @@ impl CasFS {
     }
 
     /// Delete an object from a bucket.
-    pub async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), sled::Error> {
+    pub async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), MetaError> {
         info!("Deleting object {}", object);
+        let path_map = self.meta_store.get_base_tree(PATH_TREE)?;
 
-        // Remove an object. This fetches the object, decrements the refcount of all blocks,
-        // and removes blocks which are no longer referenced.
-        let block_map = self.sled_block_tree()?;
-        let path_map = self.sled_path_tree()?;
-        let bucket = self.sled_bucket(bucket)?;
-        let blocks_to_delete_res: Result<Vec<Block>, sled::transaction::TransactionError> =
-            (&bucket, &block_map).transaction(|(bucket, blocks)| {
-                match bucket.get(object)? {
-                    None => Ok(vec![]),
-                    Some(o) => {
-                        let obj = Object::try_from(&*o).expect("Malformed object");
-                        let mut to_delete = Vec::with_capacity(obj.blocks().len());
-                        // delete the object in the database, we have it in memory to remove the
-                        // blocks as needed.
-                        bucket.remove(object)?;
-                        for block_id in obj.blocks() {
-                            match blocks.get(block_id)? {
-                                // This is technically impossible
-                                None => {
-                                    eprintln!("missing block {} in block map", hex_string(block_id))
-                                }
-                                Some(block_data) => {
-                                    let mut block =
-                                        Block::try_from(&*block_data).expect("corrupt block data");
-                                    // We are deleting the last reference to the block, delete the
-                                    // whole block.
-                                    // Importantly, we don't remove the path yet from the path map.
-                                    // Leaving this path dangling in the database ensures it is not
-                                    // filled in by another block, before we properly delete the
-                                    // path from disk.
-                                    if block.rc() == 1 {
-                                        blocks.remove(block_id)?;
-                                        to_delete.push(block);
-                                    } else {
-                                        block.decrement_refcount();
-                                        blocks.insert(block_id, Vec::from(&block))?;
-                                    }
-                                }
-                            }
-                        }
-                        Ok(to_delete)
-                    }
-                }
-            });
-
-        let blocks_to_delete = match blocks_to_delete_res {
-            Err(sled::transaction::TransactionError::Storage(e)) => {
-                return Err(e);
-            }
-            Ok(blocks) => blocks,
-            // We don't abort manually so this can't happen
-            Err(sled::transaction::TransactionError::Abort(_)) => unreachable!(),
-        };
+        let blocks_to_delete = self.meta_store.delete_objects(bucket, object)?;
 
         // Now delete all the blocks from disk, and unlink them in the path map.
         for block in blocks_to_delete {
@@ -247,7 +192,7 @@ impl CasFS {
             if let Err(e) = path_map.remove(block.path()) {
                 // Only print error, we might be able to remove the other ones. If we exist
                 // here, those will be left dangling.
-                eprintln!(
+                error!(
                     "Could not unlink path {} from path map: {}",
                     hex_string(block.path()),
                     e
