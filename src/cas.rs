@@ -3,6 +3,7 @@ pub mod meta_store;
 pub mod multipart;
 pub mod range_request;
 pub use fs::CasFS;
+pub use fs::StorageEngine;
 mod block;
 mod bucket_meta;
 mod buffered_byte_stream;

@@ -1,4 +1,4 @@
-use s3_cas::cas::CasFS;
+use s3_cas::cas::{CasFS, StorageEngine};
 
 use std::path::PathBuf;
 
@@ -27,6 +27,9 @@ struct Args {
 
     #[structopt(long, requires("access-key"), display_order = 1000)]
     secret_key: Option<String>,
+
+    #[structopt(long = "sled", parse(from_flag = std::ops::Not::not))]
+    sled: bool,
 }
 
 fn setup_tracing() {
@@ -53,12 +56,19 @@ use s3s::service::S3ServiceBuilder;
 
 #[tokio::main]
 async fn run(args: Args) -> anyhow::Result<()> {
+    info!("args fjall = {}", args.sled);
+    let storage_engine = if args.sled {
+        StorageEngine::Sled
+    } else {
+        StorageEngine::Fjall
+    };
     // provider
     let metrics = s3_cas::metrics::SharedMetrics::new();
     let casfs = CasFS::new(
         args.fs_root.clone(),
         args.meta_root.clone(),
         metrics.clone(),
+        storage_engine,
     );
     let s3fs = s3_cas::s3fs::S3FS::new(args.fs_root, args.meta_root, casfs, metrics.clone());
 

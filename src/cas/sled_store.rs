@@ -1,6 +1,6 @@
-use std::any::Any;
 use std::convert::TryFrom;
 use std::ops::Deref;
+use std::{any::Any, path::PathBuf};
 
 use faster_hex::hex_string;
 use sled;
@@ -30,7 +30,8 @@ pub struct SledStore {
 }
 
 impl SledStore {
-    pub fn new(db: sled::Db) -> Self {
+    pub fn new(meta_path: PathBuf) -> Self {
+        let db = sled::open(meta_path).unwrap();
         Self { db }
     }
 

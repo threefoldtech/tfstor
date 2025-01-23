@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::{io, mem, path::PathBuf};
 
 use super::{
-    block::BlockID, bucket_meta::BucketMeta, buffered_byte_stream::BufferedByteStream,
+    block::BlockID, bucket_meta::BucketMeta, buffered_byte_stream::BufferedByteStream, fjall_store,
     meta_errors::MetaError, meta_store, object::Object, sled_store,
 };
 use crate::metrics::SharedMetrics;
@@ -72,15 +72,29 @@ pub struct CasFS {
     metrics: SharedMetrics,
 }
 
+pub enum StorageEngine {
+    Sled,
+    Fjall,
+}
+
 impl CasFS {
-    pub fn new(mut root: PathBuf, mut meta_path: PathBuf, metrics: SharedMetrics) -> Self {
+    pub fn new(
+        mut root: PathBuf,
+        mut meta_path: PathBuf,
+        metrics: SharedMetrics,
+        storage_engine: StorageEngine,
+    ) -> Self {
         meta_path.push("db");
         root.push("blocks");
-        let db = sled::open(meta_path).unwrap();
+        let meta_store: Box<dyn meta_store::MetaStore> = match storage_engine {
+            StorageEngine::Sled => Box::new(sled_store::SledStore::new(meta_path)),
+            StorageEngine::Fjall => Box::new(fjall_store::FjallStore::new(meta_path)),
+        };
+
         // Get the current amount of buckets
-        metrics.set_bucket_count(db.open_tree(BUCKET_META_TREE).unwrap().len());
+        //metrics.set_bucket_count(db.open_tree(BUCKET_META_TREE).unwrap().len());
         Self {
-            meta_store: Box::new(sled_store::SledStore::new(db)),
+            meta_store,
             root,
             metrics,
         }

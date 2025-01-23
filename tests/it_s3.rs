@@ -66,12 +66,14 @@ fn config() -> &'static SdkConfig {
         // Fake credentials
         let cred = Credentials::for_tests();
 
-        // Setup S3 provider
-        //fs::create_dir_all(FS_ROOT).unwrap();
-        //let fs = FileSystem::new(FS_ROOT).unwrap();
-
         let metrics = s3_cas::metrics::SharedMetrics::new();
-        let casfs = s3_cas::cas::CasFS::new(FS_ROOT.into(), FS_ROOT.into(), metrics.clone());
+        let storage_engine = s3_cas::cas::StorageEngine::Fjall;
+        let casfs = s3_cas::cas::CasFS::new(
+            FS_ROOT.into(),
+            FS_ROOT.into(),
+            metrics.clone(),
+            storage_engine,
+        );
         let s3fs = s3_cas::s3fs::S3FS::new(FS_ROOT.into(), FS_ROOT.into(), casfs, metrics.clone());
 
         // Setup S3 service
