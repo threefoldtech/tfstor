@@ -70,6 +70,8 @@ pub trait BaseMetaTree: Send + Sync {
 }
 
 pub trait MetaTreeExt: BaseMetaTree {
+    // get all keys of the bucket
+    // TODO : make it paginated
     fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send>;
 
     fn range_filter_skip<'a>(

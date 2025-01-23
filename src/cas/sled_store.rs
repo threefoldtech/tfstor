@@ -140,11 +140,13 @@ impl MetaStore for SledStore {
                 match bucket.get(key)? {
                     None => Ok(vec![]),
                     Some(o) => {
+                        // get the objects
                         let obj = Object::try_from(&*o).expect("Malformed object");
                         let mut to_delete = Vec::with_capacity(obj.blocks().len());
                         // delete the object in the database, we have it in memory to remove the
                         // blocks as needed.
                         bucket.remove(key)?;
+
                         for block_id in obj.blocks() {
                             match blocks.get(block_id)? {
                                 // This is technically impossible
