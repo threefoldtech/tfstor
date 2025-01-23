@@ -17,12 +17,14 @@ use super::{
 
 impl From<sled::Error> for MetaError {
     fn from(error: sled::Error) -> Self {
-        MetaError::UnknownError(error.to_string())
+        MetaError::OtherDBError(error.to_string())
     }
 }
 
 const BUCKET_META_TREE: &str = "_BUCKETS";
 const BLOCK_TREE: &str = "_BLOCKS";
+const PATH_TREE: &str = "_PATHS";
+const MULTIPART_TREE: &str = "_MULTIPART_PARTS";
 
 #[derive(Debug)]
 pub struct SledStore {
@@ -38,21 +40,34 @@ impl SledStore {
     fn get_tree(&self, name: &str) -> Result<sled::Tree, MetaError> {
         match self.db.open_tree(name) {
             Ok(tree) => Ok(tree),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 }
 
 impl MetaStore for SledStore {
-    fn get_base_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        match self.db.open_tree(name) {
-            Ok(tree) => Ok(Box::new(SledTree::new(tree))),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
+    fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
+        let tree = self.get_tree(name)?;
+        Ok(Box::new(SledTree::new(tree)))
     }
 
-    fn get_tree(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
-        let tree = self.get_tree(name)?;
+    fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        let tree = self.get_tree(BUCKET_META_TREE)?;
+        Ok(Box::new(SledTree::new(tree)))
+    }
+
+    fn get_block_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        let tree = self.get_tree(BLOCK_TREE)?;
+        Ok(Box::new(SledTree::new(tree)))
+    }
+
+    fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        let tree = self.get_tree(PATH_TREE)?;
+        Ok(Box::new(SledTree::new(tree)))
+    }
+
+    fn get_multipart_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        let tree = self.get_tree(MULTIPART_TREE)?;
         Ok(Box::new(SledTree::new(tree)))
     }
 
@@ -60,17 +75,15 @@ impl MetaStore for SledStore {
     fn drop_tree(&self, name: &str) -> Result<(), MetaError> {
         match self.db.drop_tree(name) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
-    fn insert_bucket(&self, bucket_name: String, bm: BucketMeta) -> Result<(), MetaError> {
-        let raw_bm = bm.to_vec();
-
-        let bucket_meta = self.get_tree(BUCKET_META_TREE)?;
-        match bucket_meta.insert(bucket_name, raw_bm) {
+    fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
+        let bucket_tree = self.get_tree(BUCKET_META_TREE)?;
+        match bucket_tree.insert(bucket_name, raw_bucket) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
@@ -79,7 +92,7 @@ impl MetaStore for SledStore {
         match tree.contains_key(bucket_name) {
             Ok(true) => Ok(true),
             Ok(false) => Ok(false),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
@@ -87,13 +100,13 @@ impl MetaStore for SledStore {
         &self,
         bucket_name: &str,
         key: &str,
-        obj_meta: Object,
-    ) -> Result<Object, MetaError> {
+        raw_obj: Vec<u8>,
+    ) -> Result<(), MetaError> {
         let bucket = self.get_tree(bucket_name)?;
 
-        match bucket.insert(key.as_bytes(), obj_meta.to_vec()) {
-            Ok(_) => Ok(obj_meta),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        match bucket.insert(key.as_bytes(), raw_obj) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
@@ -101,7 +114,7 @@ impl MetaStore for SledStore {
         let bucket = self.get_tree(bucket)?;
         let object = match bucket.get(key) {
             Ok(o) => o,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
         match object {
             Some(o) => Ok(Object::try_from(&*o).expect("Malformed object")),
@@ -113,7 +126,7 @@ impl MetaStore for SledStore {
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         let bucket_tree = match self.get_tree(BUCKET_META_TREE) {
             Ok(t) => t,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
         let buckets = bucket_tree
             .scan_prefix([])
@@ -179,7 +192,7 @@ impl MetaStore for SledStore {
             });
         let blocks_to_delete = match blocks_to_delete_res {
             Err(sled::transaction::TransactionError::Storage(e)) => {
-                return Err(MetaError::UnknownError(e.to_string()))
+                return Err(MetaError::OtherDBError(e.to_string()))
             }
             Ok(blocks) => blocks,
             // We don't abort manually so this can't happen
@@ -268,7 +281,7 @@ impl SledTree {
         match self.tree.get(key) {
             Ok(Some(v)) => Ok(Some(v)),
             Ok(None) => Ok(None),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 }
@@ -281,14 +294,14 @@ impl BaseMetaTree for SledTree {
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
         match self.tree.insert(key, value) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
     fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
         match self.tree.remove(key) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
@@ -296,7 +309,7 @@ impl BaseMetaTree for SledTree {
         let block_data = self.get(key)?.ok_or(MetaError::KeyNotFound)?;
         let block = match Block::try_from(&*block_data) {
             Ok(b) => b,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
         Ok(block)
     }
@@ -314,7 +327,7 @@ impl MetaTreeExt for SledTree {
         Box::new(self.tree.iter().keys().map(|key_result| {
             key_result
                 .map(|ivec| ivec.to_vec())
-                .map_err(|e| MetaError::UnknownError(e.to_string()))
+                .map_err(|e| MetaError::OtherDBError(e.to_string()))
         }))
     }
 

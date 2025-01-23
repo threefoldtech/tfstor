@@ -10,11 +10,20 @@ use super::{
 use std::fmt::Debug;
 
 pub trait MetaStore: Send + Sync + Debug + 'static {
-    /// get_base_tree returns a base tree for the given name.
-    fn get_base_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+    /// get_bucket_tree returns the bucket meta tree
+    fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
-    /// get_tree returns a tree for the given name.
-    fn get_tree(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError>;
+    /// get_bucket_ext returns the bucket with the extended methods.
+    fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError>;
+
+    /// get_block_tree returns the block meta tree
+    fn get_block_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+
+    /// get_path_tree returns the path meta tree
+    fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+
+    /// get_multipart_tree returns the multipart meta tree
+    fn get_multipart_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
     /// bucket_exists returns true if the bucket exists.
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError>;
@@ -22,16 +31,16 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// drop_tree drops the tree with the given name.
     fn drop_tree(&self, name: &str) -> Result<(), MetaError>;
 
-    /// insert_bucket inserts a bucket into the meta store.
-    fn insert_bucket(&self, bucket_name: String, bm: BucketMeta) -> Result<(), MetaError>;
+    /// insert_bucket inserts raw representation of the bucket into the meta store.
+    fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError>;
 
     /// insert_meta_obj inserts an object into the meta store.
     fn insert_meta_obj(
         &self,
         bucket_name: &str,
         key: &str,
-        obj_meta: Object,
-    ) -> Result<Object, MetaError>;
+        raw_obj: Vec<u8>,
+    ) -> Result<(), MetaError>;
 
     /// get_meta_obj returns the object metadata for the given bucket and key.
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError>;

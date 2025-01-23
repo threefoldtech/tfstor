@@ -10,7 +10,7 @@ pub enum MetaError {
     BucketNotFound,
     NotMetaTree(String),
     TransactionError(String),
-    UnknownError(String),
+    OtherDBError(String),
 }
 
 // Implement the std::error::Error trait
@@ -26,7 +26,7 @@ impl fmt::Display for MetaError {
             MetaError::BucketNotFound => write!(f, "Bucket not found"),
             MetaError::NotMetaTree(ref s) => write!(f, "Not a meta tree: {}", s),
             MetaError::TransactionError(ref s) => write!(f, "Transaction error: {}", s),
-            MetaError::UnknownError(ref s) => write!(f, "Unknown error: {}", s),
+            MetaError::OtherDBError(ref s) => write!(f, "Other DB error: {}", s),
         }
     }
 }

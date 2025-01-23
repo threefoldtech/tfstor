@@ -20,10 +20,6 @@ use rusoto_core::ByteStream;
 use tracing::{error, info};
 
 pub const BLOCK_SIZE: usize = 1 << 20; // Supposedly 1 MiB
-const BUCKET_META_TREE: &str = "_BUCKETS";
-const BLOCK_TREE: &str = "_BLOCKS";
-const PATH_TREE: &str = "_PATHS";
-const MULTIPART_TREE: &str = "_MULTIPART_PARTS";
 pub const PTR_SIZE: usize = mem::size_of::<usize>(); // Size of a `usize` in bytes
 
 struct PendingMarker {
@@ -100,20 +96,24 @@ impl CasFS {
         }
     }
 
+    fn path_tree(&self) -> Result<Box<dyn meta_store::BaseMetaTree>, MetaError> {
+        self.meta_store.get_path_tree()
+    }
+
     pub fn get_bucket(
         &self,
         bucket_name: &str,
     ) -> Result<Box<dyn meta_store::MetaTree + Send + Sync>, MetaError> {
-        self.meta_store.get_tree(bucket_name)
+        self.meta_store.get_bucket_ext(bucket_name)
     }
 
     /// Open the tree containing the block map.
     pub fn block_tree(&self) -> Result<Box<dyn meta_store::BaseMetaTree>, MetaError> {
-        self.meta_store.get_base_tree(BLOCK_TREE)
+        self.meta_store.get_block_tree()
     }
 
     pub fn multipart_tree(&self) -> Result<Box<dyn meta_store::BaseMetaTree>, MetaError> {
-        self.meta_store.get_base_tree(MULTIPART_TREE)
+        self.meta_store.get_multipart_tree()
     }
 
     /// Check if a bucket with a given name exists.
@@ -132,7 +132,9 @@ impl CasFS {
         blocks: Vec<BlockID>,
     ) -> Result<Object, MetaError> {
         let obj_meta = Object::new(size, e_tag, parts, blocks);
-        self.meta_store.insert_meta_obj(bucket_name, key, obj_meta)
+        self.meta_store
+            .insert_meta_obj(bucket_name, key, obj_meta.to_vec())?;
+        Ok(obj_meta)
     }
 
     // get meta object from the DB
@@ -143,15 +145,15 @@ impl CasFS {
     // create and insert a new  bucket
     pub fn create_bucket(&self, bucket_name: String) -> Result<(), MetaError> {
         let bm = BucketMeta::new(bucket_name.clone());
-        self.meta_store.insert_bucket(bucket_name, bm)
+        self.meta_store.insert_bucket(bucket_name, bm.to_vec())
     }
 
     /// Remove a bucket and its associated metadata.
     // TODO: this is very much not optimal
     pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
-        let bmt = self.meta_store.get_base_tree(BUCKET_META_TREE)?;
+        let bmt = self.meta_store.get_bucket_tree()?;
         bmt.remove(bucket_name.as_bytes())?;
-        let bucket = self.meta_store.get_tree(bucket_name)?;
+        let bucket = self.meta_store.get_bucket_ext(bucket_name)?;
 
         for key in bucket.get_bucket_keys() {
             let key = key?;
@@ -174,7 +176,7 @@ impl CasFS {
     /// Delete an object from a bucket.
     pub async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), MetaError> {
         info!("Deleting object {}", object);
-        let path_map = self.meta_store.get_base_tree(PATH_TREE)?;
+        let path_map = self.path_tree()?;
 
         let blocks_to_delete = self.meta_store.delete_objects(bucket, object)?;
 
@@ -201,8 +203,8 @@ impl CasFS {
     /// Save data on the filesystem. A list of block ID's used as keys for the data blocks is
     /// returned, along with the hash of the full byte stream, and the length of the stream.
     pub async fn store_bytes(&self, data: ByteStream) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
-        let block_map = Arc::new(self.meta_store.get_base_tree(BLOCK_TREE)?);
-        let path_map = Arc::new(self.meta_store.get_base_tree(PATH_TREE)?);
+        let block_map = Arc::new(self.meta_store.get_block_tree()?);
+        let path_map = Arc::new(self.path_tree()?);
         let (tx, rx) = unbounded();
         let mut content_hash = Md5::new();
         let data = BufferedByteStream::new(data);

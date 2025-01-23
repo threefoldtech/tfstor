@@ -19,6 +19,8 @@ use super::{
 
 const BUCKET_META_PARTITION: &str = "_BUCKETS";
 const BLOCK_PARTITION: &str = "_BLOCKS";
+const PATH_PARTITION: &str = "_PATHS";
+const MULTIPART_PARTITION: &str = "_MULTIPART_PARTS";
 
 pub struct FjallStore {
     keyspace: fjall::Keyspace,
@@ -41,24 +43,40 @@ impl FjallStore {
     fn get_partition(&self, name: &str) -> Result<fjall::PartitionHandle, MetaError> {
         match self.keyspace.open_partition(name, Default::default()) {
             Ok(partition) => Ok(partition),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+        }
+    }
+
+    fn get_base_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        match self.keyspace.open_partition(name, Default::default()) {
+            Ok(partition) => Ok(Box::new(FjallTree::new(partition))),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 }
 
 impl MetaStore for FjallStore {
-    fn get_base_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
         match self.keyspace.open_partition(name, Default::default()) {
             Ok(partition) => Ok(Box::new(FjallTree::new(partition))),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
-    fn get_tree(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
-        match self.keyspace.open_partition(name, Default::default()) {
-            Ok(partition) => Ok(Box::new(FjallTree::new(partition))),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
-        }
+    fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        self.get_base_tree(BUCKET_META_PARTITION)
+    }
+
+    fn get_block_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        self.get_base_tree(BLOCK_PARTITION)
+    }
+
+    fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        self.get_base_tree(PATH_PARTITION)
+    }
+
+    fn get_multipart_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        self.get_base_tree(MULTIPART_PARTITION)
     }
 
     /// drop_tree drops the tree with the given name.
@@ -66,17 +84,15 @@ impl MetaStore for FjallStore {
         let partition = self.get_partition(name)?;
         match self.keyspace.delete_partition(partition) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
-    fn insert_bucket(&self, bucket_name: String, bm: BucketMeta) -> Result<(), MetaError> {
-        let raw_bm = bm.to_vec();
-
-        let bucket_meta = self.get_partition(BUCKET_META_PARTITION)?;
-        match bucket_meta.insert(bucket_name, raw_bm) {
+    fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
+        let bucket_tree = self.get_partition(BUCKET_META_PARTITION)?;
+        match bucket_tree.insert(bucket_name, raw_bucket) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
@@ -85,7 +101,7 @@ impl MetaStore for FjallStore {
         match partition.contains_key(bucket_name) {
             Ok(true) => Ok(true),
             Ok(false) => Ok(false),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
@@ -93,33 +109,31 @@ impl MetaStore for FjallStore {
         &self,
         bucket_name: &str,
         key: &str,
-        obj_meta: Object,
-    ) -> Result<Object, MetaError> {
+        raw_obj: Vec<u8>,
+    ) -> Result<(), MetaError> {
         let bucket = self.get_partition(bucket_name)?;
 
-        match bucket.insert(key.as_bytes(), obj_meta.to_vec()) {
-            Ok(_) => Ok(obj_meta),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+        match bucket.insert(key.as_bytes(), raw_obj) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
         let bucket = self.get_partition(bucket)?;
-        let object = match bucket.get(key) {
-            Ok(o) => o,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+        let raw_object = match bucket.get(key) {
+            Ok(Some(o)) => o,
+            Ok(None) => return Err(MetaError::KeyNotFound),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
-        match object {
-            Some(o) => Ok(Object::try_from(&*o).expect("Malformed object")),
-            None => Err(MetaError::KeyNotFound),
-        }
+        Ok(Object::try_from(&*raw_object).expect("Malformed object"))
     }
 
     /// Get a list of all buckets in the system.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         let bucket_tree = match self.get_partition(BUCKET_META_PARTITION) {
             Ok(t) => t,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
         let buckets = bucket_tree
             .range::<Vec<u8>, _>(std::ops::RangeFull) // Specify type parameter for range
@@ -147,7 +161,7 @@ impl MetaStore for FjallStore {
         let raw_object = match bucket.get(key) {
             Ok(Some(o)) => o,
             Ok(None) => return Ok(vec![]),
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
 
         let obj = Object::try_from(&*raw_object).expect("Malformed object");
@@ -156,11 +170,11 @@ impl MetaStore for FjallStore {
         // blocks as needed.
         bucket
             .remove(key)
-            .map_err(|err| MetaError::UnknownError(err.to_string()))?;
+            .map_err(|err| MetaError::OtherDBError(err.to_string()))?;
 
         for block_id in obj.blocks() {
             match blocks.get(block_id) {
-                Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+                Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
                 Ok(None) => continue,
                 Ok(Some(block_data)) => {
                     let mut block = Block::try_from(&*block_data).expect("corrupt block data");
@@ -173,13 +187,13 @@ impl MetaStore for FjallStore {
                     if block.rc() == 1 {
                         blocks
                             .remove(block_id)
-                            .map_err(|e| MetaError::UnknownError(e.to_string()))?;
+                            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
                         to_delete.push(block);
                     } else {
                         block.decrement_refcount();
                         match blocks.insert(block_id, Vec::from(&block)) {
                             Ok(_) => (),
-                            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+                            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
                         }
                     }
                 }
@@ -215,7 +229,7 @@ impl MetaStore for FjallStore {
                     // TODO: this could be done in an `update_and_fetch`
                     match blocks.insert(block_hash, Vec::from(&block)) {
                         Ok(_) => (),
-                        Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
                     }
                 }
 
@@ -227,19 +241,19 @@ impl MetaStore for FjallStore {
                     match paths.get(&block_hash[..index]) {
                         Ok(Some(_)) => continue,
                         Ok(None) => (),
-                        Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
                     }
 
                     // path is free, insert
                     paths
                         .insert(&block_hash[..index], block_hash)
-                        .map_err(|e| MetaError::UnknownError(e.to_string()))?;
+                        .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
 
                     let block = Block::new(data_len, block_hash[..index].to_vec());
 
                     blocks
                         .insert(block_hash, Vec::from(&block))
-                        .map_err(|e| MetaError::UnknownError(e.to_string()))?;
+                        .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
                     return Ok(true);
                 }
 
@@ -247,7 +261,7 @@ impl MetaStore for FjallStore {
                 // block, wich already breaks out at the start.
                 unreachable!();
             }
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 }
@@ -265,7 +279,7 @@ impl FjallTree {
         match self.partition.get(key) {
             Ok(Some(v)) => Ok(v),
             Ok(None) => Err(MetaError::KeyNotFound),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 }
@@ -278,14 +292,14 @@ impl BaseMetaTree for FjallTree {
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
         match self.partition.insert(key, value) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
     fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
         match self.partition.remove(key) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
@@ -294,7 +308,7 @@ impl BaseMetaTree for FjallTree {
 
         let block = match Block::try_from(&*block_data) {
             Ok(b) => b,
-            Err(e) => return Err(MetaError::UnknownError(e.to_string())),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
         Ok(block)
     }
@@ -327,7 +341,7 @@ impl Iterator for KeyIterator {
             .next()
             .map(|res| {
                 res.map(|(k, _)| k.to_vec())
-                    .map_err(|e| MetaError::UnknownError(e.to_string()))
+                    .map_err(|e| MetaError::OtherDBError(e.to_string()))
             })
     }
 }
