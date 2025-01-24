@@ -180,6 +180,7 @@ impl S3 for S3FS {
     ) -> S3Result<S3Response<CreateBucketOutput>> {
         let input = req.input;
 
+        info!("create bucket");
         if try_!(self.casfs.bucket_exists(&input.bucket)) {
             return Err(s3_error!(
                 BucketAlreadyExists,

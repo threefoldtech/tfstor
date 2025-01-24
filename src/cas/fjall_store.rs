@@ -3,8 +3,8 @@
 use std::any::Any;
 use std::convert::TryFrom;
 use std::ops::Deref;
-
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use fjall;
 
@@ -23,7 +23,11 @@ const PATH_PARTITION: &str = "_PATHS";
 const MULTIPART_PARTITION: &str = "_MULTIPART_PARTS";
 
 pub struct FjallStore {
-    keyspace: fjall::Keyspace,
+    keyspace: fjall::TxKeyspace,
+    bucket_partition: Arc<fjall::TxPartitionHandle>,
+    block_partition: Arc<fjall::TxPartitionHandle>,
+    path_partition: Arc<fjall::TxPartitionHandle>,
+    multipart_partition: Arc<fjall::TxPartitionHandle>,
 }
 
 impl std::fmt::Debug for FjallStore {
@@ -36,47 +40,88 @@ impl std::fmt::Debug for FjallStore {
 
 impl FjallStore {
     pub fn new(path: PathBuf) -> Self {
-        let keyspace = fjall::Config::new(path).open().unwrap();
-        Self { keyspace }
+        let tx_keyspace = fjall::Config::new(path).open_transactional().unwrap();
+        let bucket_partition = tx_keyspace
+            .open_partition(BUCKET_META_PARTITION, Default::default())
+            .unwrap();
+        let block_partition = tx_keyspace
+            .open_partition(BLOCK_PARTITION, Default::default())
+            .unwrap();
+        let path_partition = tx_keyspace
+            .open_partition(PATH_PARTITION, Default::default())
+            .unwrap();
+        let multipart_partition = tx_keyspace
+            .open_partition(MULTIPART_PARTITION, Default::default())
+            .unwrap();
+        Self {
+            keyspace: tx_keyspace,
+            bucket_partition: Arc::new(bucket_partition),
+            block_partition: Arc::new(block_partition),
+            path_partition: Arc::new(path_partition),
+            multipart_partition: Arc::new(multipart_partition),
+        }
     }
 
-    fn get_partition(&self, name: &str) -> Result<fjall::PartitionHandle, MetaError> {
+    fn get_base_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        match self.keyspace.open_partition(name, Default::default()) {
+            Ok(partition) => Ok(Box::new(FjallTree::new(
+                self.keyspace.clone(),
+                Arc::new(partition),
+            ))),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+        }
+    }
+
+    fn get_partition(&self, name: &str) -> Result<fjall::TxPartitionHandle, MetaError> {
         match self.keyspace.open_partition(name, Default::default()) {
             Ok(partition) => Ok(partition),
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
 
-    fn get_base_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        match self.keyspace.open_partition(name, Default::default()) {
-            Ok(partition) => Ok(Box::new(FjallTree::new(partition))),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+    fn persist(&self) -> Result<(), MetaError> {
+        match self.keyspace.persist(fjall::PersistMode::SyncAll) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MetaError::PersistError(e.to_string())),
         }
     }
 }
 
 impl MetaStore for FjallStore {
     fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
-        match self.keyspace.open_partition(name, Default::default()) {
-            Ok(partition) => Ok(Box::new(FjallTree::new(partition))),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        }
+        let bucket = self.get_partition(name)?;
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            Arc::new(bucket),
+        )))
     }
 
     fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        self.get_base_tree(BUCKET_META_PARTITION)
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            self.bucket_partition.clone(),
+        )))
     }
 
     fn get_block_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        self.get_base_tree(BLOCK_PARTITION)
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            self.block_partition.clone(),
+        )))
     }
 
     fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        self.get_base_tree(PATH_PARTITION)
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            self.path_partition.clone(),
+        )))
     }
 
     fn get_multipart_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        self.get_base_tree(MULTIPART_PARTITION)
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            self.multipart_partition.clone(),
+        )))
     }
 
     /// drop_tree drops the tree with the given name.
@@ -89,16 +134,20 @@ impl MetaStore for FjallStore {
     }
 
     fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
-        let bucket_tree = self.get_partition(BUCKET_META_PARTITION)?;
-        match bucket_tree.insert(bucket_name, raw_bucket) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        }
+        let mut tx = self.keyspace.write_tx();
+        tx.insert(&self.bucket_partition, bucket_name, raw_bucket);
+        tx.commit()
+            .map_err(|e| MetaError::TransactionError(e.to_string()))?;
+        self.persist()?;
+        Ok(())
     }
 
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-        let partition = self.get_partition(BUCKET_META_PARTITION)?;
-        match partition.contains_key(bucket_name) {
+        match self
+            .keyspace
+            .read_tx()
+            .contains_key(&self.bucket_partition, bucket_name)
+        {
             Ok(true) => Ok(true),
             Ok(false) => Ok(false),
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
@@ -112,16 +161,16 @@ impl MetaStore for FjallStore {
         raw_obj: Vec<u8>,
     ) -> Result<(), MetaError> {
         let bucket = self.get_partition(bucket_name)?;
-
-        match bucket.insert(key.as_bytes(), raw_obj) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        }
+        bucket
+            .insert(key.as_bytes(), raw_obj)
+            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+        Ok(())
     }
 
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
         let bucket = self.get_partition(bucket)?;
-        let raw_object = match bucket.get(key) {
+        let read_tx = self.keyspace.read_tx();
+        let raw_object = match read_tx.get(&bucket, key) {
             Ok(Some(o)) => o,
             Ok(None) => return Err(MetaError::KeyNotFound),
             Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
@@ -131,12 +180,9 @@ impl MetaStore for FjallStore {
 
     /// Get a list of all buckets in the system.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        let bucket_tree = match self.get_partition(BUCKET_META_PARTITION) {
-            Ok(t) => t,
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-        let buckets = bucket_tree
-            .range::<Vec<u8>, _>(std::ops::RangeFull) // Specify type parameter for range
+        let read_tx = self.keyspace.read_tx();
+        let buckets = read_tx
+            .range::<Vec<u8>, _>(&self.bucket_partition, std::ops::RangeFull) // Specify type parameter for range
             .filter_map(|raw_value| {
                 let value = match raw_value {
                     Err(_) => return None,
@@ -153,7 +199,6 @@ impl MetaStore for FjallStore {
     fn delete_objects(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError> {
         // Remove an object. This fetches the object, decrements the refcount of all blocks,
         // and removes blocks which are no longer referenced.
-        let blocks = self.get_partition(BLOCK_PARTITION)?;
         let bucket = self.get_partition(bucket)?;
 
         // transaction
@@ -166,14 +211,14 @@ impl MetaStore for FjallStore {
 
         let obj = Object::try_from(&*raw_object).expect("Malformed object");
         let mut to_delete: Vec<Block> = Vec::with_capacity(obj.blocks().len());
+
+        let mut tx = self.keyspace.write_tx();
         // delete the object in the database, we have it in memory to remove the
         // blocks as needed.
-        bucket
-            .remove(key)
-            .map_err(|err| MetaError::OtherDBError(err.to_string()))?;
+        tx.remove(&bucket, key);
 
         for block_id in obj.blocks() {
-            match blocks.get(block_id) {
+            match tx.get(&self.block_partition, block_id) {
                 Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
                 Ok(None) => continue,
                 Ok(Some(block_data)) => {
@@ -185,20 +230,18 @@ impl MetaStore for FjallStore {
                     // filled in by another block, before we properly delete the
                     // path from disk.
                     if block.rc() == 1 {
-                        blocks
-                            .remove(block_id)
-                            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+                        tx.remove(&self.block_partition, block_id);
                         to_delete.push(block);
                     } else {
                         block.decrement_refcount();
-                        match blocks.insert(block_id, Vec::from(&block)) {
-                            Ok(_) => (),
-                            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-                        }
+                        tx.insert(&self.block_partition, block_id, Vec::from(&block));
                     }
                 }
             }
         }
+        tx.commit()
+            .map_err(|e| MetaError::TransactionError(e.to_string()))?;
+        self.persist()?;
         Ok(to_delete)
     }
 
@@ -217,7 +260,8 @@ impl MetaStore for FjallStore {
         let blocks = &block_map.partition;
         let paths = &path_map.partition;
 
-        match blocks.get(block_hash) {
+        let mut tx = self.keyspace.write_tx();
+        let should_write = match tx.get(blocks, block_hash) {
             Ok(Some(block_data)) => {
                 // Block already exists
                 {
@@ -227,52 +271,62 @@ impl MetaStore for FjallStore {
                     block.increment_refcount();
                     // write block back
                     // TODO: this could be done in an `update_and_fetch`
-                    match blocks.insert(block_hash, Vec::from(&block)) {
-                        Ok(_) => (),
-                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-                    }
+                    tx.insert(blocks, block_hash, Vec::from(&block));
                 }
 
                 Ok(false)
             }
             Ok(None) => {
+                let mut idx = 0;
                 // find a free path
                 for index in 1..BLOCKID_SIZE {
-                    match paths.get(&block_hash[..index]) {
+                    match tx.get(paths, &block_hash[..index]) {
                         Ok(Some(_)) => continue,
-                        Ok(None) => (),
+                        Ok(None) => {
+                            idx = index;
+                            break;
+                        }
                         Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
                     }
-
-                    // path is free, insert
-                    paths
-                        .insert(&block_hash[..index], block_hash)
-                        .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
-
-                    let block = Block::new(data_len, block_hash[..index].to_vec());
-
-                    blocks
-                        .insert(block_hash, Vec::from(&block))
-                        .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
-                    return Ok(true);
                 }
-
                 // The loop above can only NOT find a path in case it is duplicate
                 // block, wich already breaks out at the start.
-                unreachable!();
+
+                // path is free, insert
+                tx.insert(paths, &block_hash[..idx], block_hash);
+
+                let block = Block::new(data_len, block_hash[..idx].to_vec());
+
+                tx.insert(blocks, block_hash, Vec::from(&block));
+                Ok(true)
             }
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+        };
+        match should_write {
+            Ok(should_write) => {
+                if should_write {
+                    tx.commit()
+                        .map_err(|e| MetaError::TransactionError(e.to_string()))?;
+                    self.persist()?;
+                }
+                Ok(should_write)
+            }
+            Err(e) => Err(e),
         }
     }
 }
 
 pub struct FjallTree {
-    partition: fjall::PartitionHandle,
+    keyspace: fjall::TxKeyspace,
+    partition: Arc<fjall::TxPartitionHandle>,
 }
 
 impl FjallTree {
-    pub fn new(partition: fjall::PartitionHandle) -> Self {
-        Self { partition }
+    pub fn new(keyspace: fjall::TxKeyspace, partition: Arc<fjall::TxPartitionHandle>) -> Self {
+        Self {
+            keyspace,
+            partition,
+        }
     }
 
     fn get(&self, key: &[u8]) -> Result<fjall::Slice, MetaError> {
@@ -323,12 +377,16 @@ impl BaseMetaTree for FjallTree {
 
 #[derive(Clone)]
 struct KeyIterator {
-    partition: fjall::PartitionHandle,
+    keyspace: fjall::TxKeyspace,
+    partition: Arc<fjall::TxPartitionHandle>,
 }
 
 impl KeyIterator {
-    fn new(partition: fjall::PartitionHandle) -> Self {
-        Self { partition }
+    fn new(keyspace: fjall::TxKeyspace, partition: Arc<fjall::TxPartitionHandle>) -> Self {
+        Self {
+            keyspace,
+            partition,
+        }
     }
 }
 
@@ -336,8 +394,9 @@ impl Iterator for KeyIterator {
     type Item = Result<Vec<u8>, MetaError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.partition
-            .range::<Vec<u8>, _>(std::ops::RangeFull)
+        let read_tx = self.keyspace.read_tx();
+        read_tx
+            .range::<Vec<u8>, _>(&self.partition, std::ops::RangeFull)
             .next()
             .map(|res| {
                 res.map(|(k, _)| k.to_vec())
@@ -348,7 +407,10 @@ impl Iterator for KeyIterator {
 
 impl MetaTreeExt for FjallTree {
     fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send> {
-        Box::new(KeyIterator::new(self.partition.clone()))
+        Box::new(KeyIterator::new(
+            self.keyspace.clone(),
+            self.partition.clone(),
+        ))
     }
 
     fn range_filter_skip<'a>(
@@ -357,9 +419,10 @@ impl MetaTreeExt for FjallTree {
         prefix_bytes: &'a [u8],
         start_after: Option<String>,
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)> {
+        let read_tx = self.keyspace.read_tx();
         Box::new(
-            self.partition
-                .range(start_bytes..)
+            read_tx
+                .range(&self.partition, start_bytes..)
                 .filter_map(|read_result| match read_result {
                     Err(_) => None,
                     Ok((k, v)) => Some((k, v)),
@@ -381,9 +444,10 @@ impl MetaTreeExt for FjallTree {
         start_bytes: &'a [u8],
         prefix_bytes: &'a [u8],
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)> {
+        let read_tx = self.keyspace.read_tx();
         Box::new(
-            self.partition
-                .range(start_bytes..)
+            read_tx
+                .range(&self.partition, start_bytes..)
                 .filter_map(|read_result| match read_result {
                     Err(_) => None,
                     Ok((k, v)) => Some((k, v)),

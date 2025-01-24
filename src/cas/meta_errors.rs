@@ -10,6 +10,7 @@ pub enum MetaError {
     BucketNotFound,
     NotMetaTree(String),
     TransactionError(String),
+    PersistError(String),
     OtherDBError(String),
 }
 
@@ -26,6 +27,7 @@ impl fmt::Display for MetaError {
             MetaError::BucketNotFound => write!(f, "Bucket not found"),
             MetaError::NotMetaTree(ref s) => write!(f, "Not a meta tree: {}", s),
             MetaError::TransactionError(ref s) => write!(f, "Transaction error: {}", s),
+            MetaError::PersistError(ref s) => write!(f, "Persist error: {}", s),
             MetaError::OtherDBError(ref s) => write!(f, "Other DB error: {}", s),
         }
     }

@@ -87,7 +87,7 @@ macro_rules! try_ {
         match $result {
             Ok(val) => val,
             Err(err) => {
-                //$crate::error::log(&err);
+                error!("try_ failed {}", err);
                 return Err(::s3s::S3Error::internal_error(err));
             }
         }
