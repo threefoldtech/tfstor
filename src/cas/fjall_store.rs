@@ -23,7 +23,7 @@ const PATH_PARTITION: &str = "_PATHS";
 const MULTIPART_PARTITION: &str = "_MULTIPART_PARTS";
 
 pub struct FjallStore {
-    keyspace: fjall::TxKeyspace,
+    keyspace: Arc<fjall::TxKeyspace>,
     bucket_partition: Arc<fjall::TxPartitionHandle>,
     block_partition: Arc<fjall::TxPartitionHandle>,
     path_partition: Arc<fjall::TxPartitionHandle>,
@@ -54,7 +54,7 @@ impl FjallStore {
             .open_partition(MULTIPART_PARTITION, Default::default())
             .unwrap();
         Self {
-            keyspace: tx_keyspace,
+            keyspace: Arc::new(tx_keyspace),
             bucket_partition: Arc::new(bucket_partition),
             block_partition: Arc::new(block_partition),
             path_partition: Arc::new(path_partition),
@@ -202,7 +202,6 @@ impl MetaStore for FjallStore {
         let bucket = self.get_partition(bucket)?;
 
         // transaction
-        //let mut tx = self.keyspace.write_tx();
         let raw_object = match bucket.get(key) {
             Ok(Some(o)) => o,
             Ok(None) => return Ok(vec![]),
@@ -317,12 +316,12 @@ impl MetaStore for FjallStore {
 }
 
 pub struct FjallTree {
-    keyspace: fjall::TxKeyspace,
+    keyspace: Arc<fjall::TxKeyspace>,
     partition: Arc<fjall::TxPartitionHandle>,
 }
 
 impl FjallTree {
-    pub fn new(keyspace: fjall::TxKeyspace, partition: Arc<fjall::TxPartitionHandle>) -> Self {
+    pub fn new(keyspace: Arc<fjall::TxKeyspace>, partition: Arc<fjall::TxPartitionHandle>) -> Self {
         Self {
             keyspace,
             partition,
@@ -377,12 +376,12 @@ impl BaseMetaTree for FjallTree {
 
 #[derive(Clone)]
 struct KeyIterator {
-    keyspace: fjall::TxKeyspace,
+    keyspace: Arc<fjall::TxKeyspace>,
     partition: Arc<fjall::TxPartitionHandle>,
 }
 
 impl KeyIterator {
-    fn new(keyspace: fjall::TxKeyspace, partition: Arc<fjall::TxPartitionHandle>) -> Self {
+    fn new(keyspace: Arc<fjall::TxKeyspace>, partition: Arc<fjall::TxPartitionHandle>) -> Self {
         Self {
             keyspace,
             partition,
