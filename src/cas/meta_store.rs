@@ -9,6 +9,12 @@ use super::{
 };
 use std::fmt::Debug;
 
+/// MetaStore is the interface that defines the methods to interact with the metadata store.
+///
+/// Current implementation of the bucket, block, path, and multipart trees are the same,
+/// the difference is only the partition/tree name.
+/// But we separate the API to make it easier to extend in the future,
+/// and give flexibility to the implementer to have different implementations for each tree.
 pub trait MetaStore: Send + Sync + Debug + 'static {
     /// get_bucket_tree returns the bucket meta tree
     fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
@@ -30,13 +36,13 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// bucket_exists returns true if the bucket exists.
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError>;
 
-    /// drop_tree drops the tree with the given name.
-    fn drop_tree(&self, name: &str) -> Result<(), MetaError>;
+    /// drop_bucket drops the bucket with the given name.
+    fn drop_bucket(&self, name: &str) -> Result<(), MetaError>;
 
     /// insert_bucket inserts raw representation of the bucket into the meta store.
     fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError>;
 
-    /// insert_meta_obj inserts an object into the meta store.
+    /// insert_meta_obj inserts a metadata Object into the meta store.
     fn insert_meta_obj(
         &self,
         bucket_name: &str,
@@ -44,7 +50,10 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
         raw_obj: Vec<u8>,
     ) -> Result<(), MetaError>;
 
-    /// get_meta_obj returns the object metadata for the given bucket and key.
+    /// get_meta_obj returns the Object metadata for the given bucket and key.
+    /// We return the Object struct instead of the raw bytes for performance reason.
+    ///
+    /// TODO: we should return the raw bytes and let the caller to deserialize it.
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError>;
 
     /// Get a list of all buckets in the system.
@@ -55,6 +64,9 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// it returns a list of blocks that were deleted.
     fn delete_objects(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError>;
 
+    // Check if the hash is present in the block map. If it is not, try to find a path, and
+    // insert it.
+    // it returns true if the block was not exists
     fn write_meta_for_block(
         &self,
         block_map: Box<dyn BaseMetaTree>,

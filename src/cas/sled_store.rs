@@ -72,7 +72,7 @@ impl MetaStore for SledStore {
     }
 
     /// drop_tree drops the tree with the given name.
-    fn drop_tree(&self, name: &str) -> Result<(), MetaError> {
+    fn drop_bucket(&self, name: &str) -> Result<(), MetaError> {
         match self.db.drop_tree(name) {
             Ok(_) => Ok(()),
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),

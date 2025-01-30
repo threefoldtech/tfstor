@@ -164,7 +164,7 @@ impl CasFS {
             .await?;
         }
 
-        self.meta_store.drop_tree(bucket_name)?;
+        self.meta_store.drop_bucket(bucket_name)?;
         Ok(())
     }
 
@@ -247,8 +247,6 @@ impl CasFS {
                 let block_hash: BlockID = hasher.finalize().into();
                 let data_len = bytes.len();
 
-                // Check if the hash is present in the block map. If it is not, try to find a path, and
-                // insert it.
                 let should_write = self.meta_store.write_meta_for_block(
                     Box::new(block_map.clone()),
                     Box::new(path_map.clone()),

@@ -116,7 +116,7 @@ impl MetaStore for FjallStore {
     }
 
     /// drop_tree drops the tree with the given name.
-    fn drop_tree(&self, name: &str) -> Result<(), MetaError> {
+    fn drop_bucket(&self, name: &str) -> Result<(), MetaError> {
         let partition = self.get_partition(name)?;
         match self.keyspace.delete_partition(partition) {
             Ok(_) => Ok(()),
@@ -164,6 +164,7 @@ impl MetaStore for FjallStore {
             Ok(None) => return Err(MetaError::KeyNotFound),
             Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
+
         Ok(Object::try_from(&*raw_object).expect("Malformed object"))
     }
 
