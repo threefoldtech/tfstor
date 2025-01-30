@@ -13,13 +13,15 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// get_bucket_tree returns the bucket meta tree
     fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
-    /// get_bucket_ext returns the bucket with the extended methods.
+    /// get_bucket_ext returns the bucket meta tree with the extended methods.
     fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError>;
 
-    /// get_block_tree returns the block meta tree
+    /// get_block_tree returns the block meta tree.
+    /// This tree is used to store the data block metadata.
     fn get_block_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
     /// get_path_tree returns the path meta tree
+    /// This tree is used to store the file path metadata.
     fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
     /// get_multipart_tree returns the multipart meta tree

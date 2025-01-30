@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::any::Any;
 use std::convert::TryFrom;
 use std::ops::Deref;
@@ -16,11 +14,6 @@ use super::{
     multipart::MultiPart,
     object::Object,
 };
-
-const BUCKET_META_PARTITION: &str = "_BUCKETS";
-const BLOCK_PARTITION: &str = "_BLOCKS";
-const PATH_PARTITION: &str = "_PATHS";
-const MULTIPART_PARTITION: &str = "_MULTIPART_PARTS";
 
 pub struct FjallStore {
     keyspace: Arc<fjall::TxKeyspace>,
@@ -40,6 +33,11 @@ impl std::fmt::Debug for FjallStore {
 
 impl FjallStore {
     pub fn new(path: PathBuf) -> Self {
+        const BUCKET_META_PARTITION: &str = "_BUCKETS";
+        const BLOCK_PARTITION: &str = "_BLOCKS";
+        const PATH_PARTITION: &str = "_PATHS";
+        const MULTIPART_PARTITION: &str = "_MULTIPART_PARTS";
+
         let tx_keyspace = fjall::Config::new(path).open_transactional().unwrap();
         let bucket_partition = tx_keyspace
             .open_partition(BUCKET_META_PARTITION, Default::default())
@@ -62,16 +60,6 @@ impl FjallStore {
         }
     }
 
-    fn get_base_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        match self.keyspace.open_partition(name, Default::default()) {
-            Ok(partition) => Ok(Box::new(FjallTree::new(
-                self.keyspace.clone(),
-                Arc::new(partition),
-            ))),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        }
-    }
-
     fn get_partition(&self, name: &str) -> Result<fjall::TxPartitionHandle, MetaError> {
         match self.keyspace.open_partition(name, Default::default()) {
             Ok(partition) => Ok(partition),
@@ -79,11 +67,14 @@ impl FjallStore {
         }
     }
 
-    fn persist(&self) -> Result<(), MetaError> {
-        match self.keyspace.persist(fjall::PersistMode::SyncAll) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MetaError::PersistError(e.to_string())),
-        }
+    fn commit_persist(&self, tx: fjall::WriteTransaction) -> Result<(), MetaError> {
+        tx.commit()
+            .map_err(|e| MetaError::TransactionError(e.to_string()))?;
+
+        self.keyspace
+            .persist(fjall::PersistMode::SyncData)
+            .map_err(|e| MetaError::PersistError(e.to_string()))?;
+        Ok(())
     }
 }
 
@@ -136,10 +127,8 @@ impl MetaStore for FjallStore {
     fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
         let mut tx = self.keyspace.write_tx();
         tx.insert(&self.bucket_partition, bucket_name, raw_bucket);
-        tx.commit()
-            .map_err(|e| MetaError::TransactionError(e.to_string()))?;
-        self.persist()?;
-        Ok(())
+
+        self.commit_persist(tx)
     }
 
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
@@ -233,14 +222,12 @@ impl MetaStore for FjallStore {
                         to_delete.push(block);
                     } else {
                         block.decrement_refcount();
-                        tx.insert(&self.block_partition, block_id, Vec::from(&block));
+                        tx.insert(&self.block_partition, block_id, block.to_vec());
                     }
                 }
             }
         }
-        tx.commit()
-            .map_err(|e| MetaError::TransactionError(e.to_string()))?;
-        self.persist()?;
+        self.commit_persist(tx)?;
         Ok(to_delete)
     }
 
@@ -270,7 +257,7 @@ impl MetaStore for FjallStore {
                     block.increment_refcount();
                     // write block back
                     // TODO: this could be done in an `update_and_fetch`
-                    tx.insert(blocks, block_hash, Vec::from(&block));
+                    tx.insert(blocks, block_hash, block.to_vec());
                 }
 
                 Ok(false)
@@ -296,7 +283,7 @@ impl MetaStore for FjallStore {
 
                 let block = Block::new(data_len, block_hash[..idx].to_vec());
 
-                tx.insert(blocks, block_hash, Vec::from(&block));
+                tx.insert(blocks, block_hash, block.to_vec());
                 Ok(true)
             }
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
@@ -304,9 +291,7 @@ impl MetaStore for FjallStore {
         match should_write {
             Ok(should_write) => {
                 if should_write {
-                    tx.commit()
-                        .map_err(|e| MetaError::TransactionError(e.to_string()))?;
-                    self.persist()?;
+                    self.commit_persist(tx)?;
                 }
                 Ok(should_write)
             }

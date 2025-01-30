@@ -96,4 +96,8 @@ impl Block {
     pub fn decrement_refcount(&mut self) {
         self.rc -= 1
     }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.into()
+    }
 }

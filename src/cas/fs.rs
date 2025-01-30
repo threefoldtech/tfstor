@@ -236,7 +236,7 @@ impl CasFS {
                         .send(Err(std::io::Error::new(e.kind(), e.to_string())))
                         .await
                     {
-                        eprintln!("Could not convey result: {}", e);
+                        error!("Could not convey result: {}", e);
                     }
                     return;
                 }
@@ -260,14 +260,14 @@ impl CasFS {
                 match should_write {
                     Err(e) => {
                         if let Err(e) = tx.send(Err(e.into())).await {
-                            eprintln!("Could not send transaction error: {}", e);
+                            error!("Could not send transaction error: {}", e);
                         }
                         return;
                     }
                     Ok(false) => {
                         pm.block_ignored();
                         if let Err(e) = tx.send(Ok((idx, block_hash))).await {
-                            eprintln!("Could not send block id: {}", e);
+                            error!("Could not send block id: {}", e);
                         }
                         return;
                     }
@@ -291,14 +291,14 @@ impl CasFS {
                 if let Err(e) = async_fs::create_dir_all(block_path.parent().unwrap()).await {
                     if let Err(e) = tx.send(Err(e)).await {
                         pm.block_write_error();
-                        eprintln!("Could not send path create error: {}", e);
+                        error!("Could not send path create error: {}", e);
                         return;
                     }
                 }
                 if let Err(e) = async_fs::write(block_path, &bytes).await {
                     if let Err(e) = tx.send(Err(e)).await {
                         pm.block_write_error();
-                        eprintln!("Could not send block write error: {}", e);
+                        error!("Could not send block write error: {}", e);
                         return;
                     }
                 }
@@ -306,7 +306,7 @@ impl CasFS {
                 pm.block_written(bytes.len());
 
                 if let Err(e) = tx.send(Ok((idx, block_hash))).await {
-                    eprintln!("Could not send block id: {}", e);
+                    error!("Could not send block id: {}", e);
                 }
             },
         )
