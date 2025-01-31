@@ -69,7 +69,7 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     // Check if the hash is present in the block map. If it is not, try to find a path, and
     // insert it.
     // it returns true if the block was not exists
-    fn write_meta_for_block(
+    fn write_block_and_path_meta(
         &self,
         block_map: Box<dyn BaseMetaTree>,
         path_map: Box<dyn BaseMetaTree>,

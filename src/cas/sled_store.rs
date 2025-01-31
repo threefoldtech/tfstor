@@ -201,7 +201,7 @@ impl MetaStore for SledStore {
         Ok(blocks_to_delete)
     }
 
-    fn write_meta_for_block(
+    fn write_block_and_path_meta(
         &self,
         block_map: Box<dyn BaseMetaTree>,
         path_map: Box<dyn BaseMetaTree>,

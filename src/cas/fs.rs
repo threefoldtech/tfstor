@@ -249,7 +249,7 @@ impl CasFS {
                 let block_hash: BlockID = hasher.finalize().into();
                 let data_len = bytes.len();
 
-                let should_write = self.meta_store.write_meta_for_block(
+                let should_write = self.meta_store.write_block_and_path_meta(
                     Box::new(block_map.clone()),
                     Box::new(path_map.clone()),
                     block_hash,
