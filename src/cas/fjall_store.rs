@@ -143,21 +143,20 @@ impl MetaStore for FjallStore {
 
     fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
         let mut tx = self.keyspace.write_tx();
-        tx.insert(&self.bucket_partition, bucket_name, raw_bucket);
+        tx.insert(&self.bucket_partition, &bucket_name, raw_bucket);
 
-        self.commit_persist(tx)
+        self.commit_persist(tx)?;
+
+        match self.get_partition(&bucket_name) {
+            // get partition to create it
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-        match self
-            .keyspace
-            .read_tx()
-            .contains_key(&self.bucket_partition, bucket_name)
-        {
-            Ok(true) => Ok(true),
-            Ok(false) => Ok(false),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        }
+        let exists = self.keyspace.partition_exists(bucket_name);
+        Ok(exists)
     }
 
     fn insert_meta_obj(
@@ -536,7 +535,7 @@ mod tests {
         assert_eq!(retrieved_obj.blocks().len(), 1);
         assert_eq!(retrieved_obj.blocks()[0], BlockID::from([1; 16]));
 
-        // Test error cases
+        // Test error cases of object retrieval
         assert!(store.get_meta_obj("nonexistent-bucket", key).is_err());
         assert!(store.get_meta_obj(bucket_name, "nonexistent-key").is_err());
     }

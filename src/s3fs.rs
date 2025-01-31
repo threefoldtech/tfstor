@@ -318,6 +318,10 @@ impl S3 for S3FS {
             bucket, key, range, ..
         } = input;
 
+        if !try_!(self.casfs.bucket_exists(&bucket)) {
+            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
+        }
+
         // load metadata
         let obj_meta = try_!(self.casfs.get_object_meta(&bucket, &key));
 
@@ -379,6 +383,10 @@ impl S3 for S3FS {
         req: S3Request<HeadObjectInput>,
     ) -> S3Result<S3Response<HeadObjectOutput>> {
         let HeadObjectInput { bucket, key, .. } = req.input;
+
+        if !try_!(self.casfs.bucket_exists(&bucket)) {
+            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
+        }
 
         let obj_meta = try_!(self.casfs.get_object_meta(&bucket, &key));
 
