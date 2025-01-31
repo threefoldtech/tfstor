@@ -476,25 +476,36 @@ mod tests {
         let (store, _dir) = setup_store();
 
         // Test bucket creation
-        let bucket_name = "test-bucket";
-        let bucket_meta = BucketMeta::new(bucket_name.to_string());
+        let bucket_name1 = "test-bucket";
+        let bucket_name2 = "test-bucket2";
+        let bucket_meta = BucketMeta::new(bucket_name1.to_string());
         store
-            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .insert_bucket(bucket_name1.to_string(), bucket_meta.to_vec())
+            .unwrap();
+        store
+            .insert_bucket(
+                bucket_name2.to_string(),
+                BucketMeta::new(bucket_name2.to_string()).to_vec(),
+            )
             .unwrap();
 
         // Verify bucket exists
-        assert_eq!(store.bucket_exists(bucket_name).unwrap(), true);
+        assert_eq!(store.bucket_exists(bucket_name1).unwrap(), true);
+        assert_eq!(store.bucket_exists(bucket_name2).unwrap(), true);
 
         // Test bucket listing
         let buckets = store.list_buckets().unwrap();
-        assert_eq!(buckets.len(), 1);
-        assert_eq!(buckets[0].name(), bucket_name);
+        assert_eq!(buckets.len(), 2);
+        assert_eq!(buckets[0].name(), bucket_name1);
+        assert_eq!(buckets[1].name(), bucket_name2);
 
         // Test bucket deletion
-        store.bucket_delete(bucket_name).unwrap();
+        store.bucket_delete(bucket_name1).unwrap();
+        store.bucket_delete(bucket_name2).unwrap();
 
         // Verify bucket not exists
-        assert_eq!(store.bucket_exists(bucket_name).unwrap(), false);
+        assert_eq!(store.bucket_exists(bucket_name1).unwrap(), false);
+        assert_eq!(store.bucket_exists(bucket_name2).unwrap(), false);
     }
 
     #[test]
