@@ -16,10 +16,12 @@ use std::fmt::Debug;
 /// But we separate the API to make it easier to extend in the future,
 /// and give flexibility to the implementer to have different implementations for each tree.
 pub trait MetaStore: Send + Sync + Debug + 'static {
-    /// get_bucket_tree returns the bucket meta tree
-    fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+    /// returns tree which contains all the buckets.
+    /// This tree is used to store the bucket lists and provide
+    /// the CRUD for the bucket list.
+    fn get_allbuckets_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
-    /// get_bucket_ext returns the bucket meta tree with the extended methods.
+    /// get_bucket_ext returns the tree for specific bucket with the extended methods.
     fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError>;
 
     /// get_block_tree returns the block meta tree.

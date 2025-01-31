@@ -51,7 +51,7 @@ impl MetaStore for SledStore {
         Ok(Box::new(SledTree::new(tree)))
     }
 
-    fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    fn get_allbuckets_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         let tree = self.get_tree(BUCKET_META_TREE)?;
         Ok(Box::new(SledTree::new(tree)))
     }

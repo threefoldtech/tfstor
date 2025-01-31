@@ -33,6 +33,7 @@ impl std::fmt::Debug for FjallStore {
 
 impl FjallStore {
     pub fn new(path: PathBuf) -> Self {
+        eprintln!("Opening fjall store at {:?}", path);
         const BUCKET_META_PARTITION: &str = "_BUCKETS";
         const BLOCK_PARTITION: &str = "_BLOCKS";
         const PATH_PARTITION: &str = "_PATHS";
@@ -72,8 +73,25 @@ impl FjallStore {
             .map_err(|e| MetaError::TransactionError(e.to_string()))?;
 
         self.keyspace
-            .persist(fjall::PersistMode::SyncData)
+            .persist(fjall::PersistMode::SyncAll)
             .map_err(|e| MetaError::PersistError(e.to_string()))?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
+        // this fn is only for testing purposes
+        let bmt = self.get_allbuckets_tree()?;
+        bmt.remove(bucket_name.as_bytes())?;
+
+        let bucket = self.get_bucket_ext(bucket_name)?;
+        for key in bucket.get_bucket_keys() {
+            let key = key?;
+            eprintln!("Deleting object {}", std::str::from_utf8(&key).unwrap());
+        }
+
+        self.drop_bucket(bucket_name)?;
+
         Ok(())
     }
 }
@@ -87,7 +105,7 @@ impl MetaStore for FjallStore {
         )))
     }
 
-    fn get_bucket_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    fn get_allbuckets_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
             self.bucket_partition.clone(),
@@ -115,8 +133,9 @@ impl MetaStore for FjallStore {
         )))
     }
 
-    /// drop_tree drops the tree with the given name.
     fn drop_bucket(&self, name: &str) -> Result<(), MetaError> {
+        let exists = self.keyspace.partition_exists(name);
+        eprintln!("partition {} exists: {}", name, exists);
         let partition = self.get_partition(name)?;
         match self.keyspace.delete_partition(partition) {
             Ok(_) => Ok(()),
@@ -150,9 +169,9 @@ impl MetaStore for FjallStore {
         raw_obj: Vec<u8>,
     ) -> Result<(), MetaError> {
         let bucket = self.get_partition(bucket_name)?;
-        bucket
-            .insert(key.as_bytes(), raw_obj)
-            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+        let mut tx = self.keyspace.write_tx();
+        tx.insert(&bucket, key.as_bytes(), raw_obj);
+        self.commit_persist(tx)?;
         Ok(())
     }
 
@@ -251,15 +270,14 @@ impl MetaStore for FjallStore {
         let should_write = match tx.get(blocks, block_hash) {
             Ok(Some(block_data)) => {
                 // Block already exists
-                {
-                    // bump refcount on the block
-                    let mut block =
-                        Block::try_from(&*block_data).expect("Only valid blocks are stored");
-                    block.increment_refcount();
-                    // write block back
-                    // TODO: this could be done in an `update_and_fetch`
-                    tx.insert(blocks, block_hash, block.to_vec());
-                }
+
+                // bump refcount on the block
+                let mut block =
+                    Block::try_from(&*block_data).expect("Only valid blocks are stored");
+                block.increment_refcount();
+                // write block back
+                // TODO: this could be done in an `update_and_fetch`
+                tx.insert(blocks, block_hash, block.to_vec());
 
                 Ok(false)
             }
@@ -451,4 +469,68 @@ impl MetaTree for FjallTree {} // Empty impl as marker
 
 fn convert_to_fjall_tree(tree: &dyn BaseMetaTree) -> Option<&FjallTree> {
     tree.as_any().downcast_ref::<FjallTree>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn setup_store() -> (FjallStore, tempfile::TempDir) {
+        let dir = tempdir().unwrap();
+        let store = FjallStore::new(dir.path().to_path_buf());
+        (store, dir)
+    }
+
+    #[test]
+    fn test_bucket_operations() {
+        let (store, _dir) = setup_store();
+
+        // Test bucket creation
+        let bucket_name = "test-bucket";
+        let bucket_meta = BucketMeta::new(bucket_name.to_string());
+        store
+            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .unwrap();
+
+        // Verify bucket exists
+        assert_eq!(
+            store.bucket_exists(bucket_name).unwrap(),
+            true,
+            "Bucket '{}' should exist",
+            bucket_name
+        );
+
+        // Test bucket listing
+        let buckets = store.list_buckets().unwrap();
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].name(), bucket_name);
+
+        // Test bucket deletion
+        store.bucket_delete(bucket_name).unwrap();
+
+        // Verify bucket not exists
+        assert_eq!(
+            store.bucket_exists(bucket_name).unwrap(),
+            false,
+            "Bucket '{}' should not exist anymore",
+            bucket_name
+        );
+    }
+
+    #[test]
+    fn test_errors() {
+        let (store, _dir) = setup_store();
+
+        // Test nonexistent bucket
+        assert!(store.get_meta_obj("nonexistent", "key").is_err());
+
+        // Test nonexistent object
+        let bucket = "test-bucket";
+        let bucket_meta = BucketMeta::new(bucket.to_string());
+        store
+            .insert_bucket(bucket.to_string(), bucket_meta.to_vec())
+            .unwrap();
+        assert!(store.get_meta_obj(bucket, "nonexistent").is_err());
+    }
 }

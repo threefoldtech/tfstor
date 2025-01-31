@@ -17,7 +17,7 @@ use futures::{
 use md5::{Digest, Md5};
 use rusoto_core::ByteStream;
 
-use tracing::{error, info};
+use tracing::error;
 
 pub const BLOCK_SIZE: usize = 1 << 20; // Supposedly 1 MiB
 pub const PTR_SIZE: usize = mem::size_of::<usize>(); // Size of a `usize` in bytes
@@ -151,10 +151,12 @@ impl CasFS {
     /// Remove a bucket and its associated metadata.
     // TODO: this is very much not optimal
     pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
-        let bmt = self.meta_store.get_bucket_tree()?;
+        // remove from the bucket list tree/partition
+        let bmt = self.meta_store.get_allbuckets_tree()?;
         bmt.remove(bucket_name.as_bytes())?;
-        let bucket = self.meta_store.get_bucket_ext(bucket_name)?;
 
+        // removes all objects in the bucket
+        let bucket = self.meta_store.get_bucket_ext(bucket_name)?;
         for key in bucket.get_bucket_keys() {
             let key = key?;
             self.delete_object(
@@ -164,6 +166,7 @@ impl CasFS {
             .await?;
         }
 
+        // remove the bucket tree/partition itself
         self.meta_store.drop_bucket(bucket_name)?;
         Ok(())
     }
@@ -174,11 +177,10 @@ impl CasFS {
     }
 
     /// Delete an object from a bucket.
-    pub async fn delete_object(&self, bucket: &str, object: &str) -> Result<(), MetaError> {
-        info!("Deleting object {}", object);
+    pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), MetaError> {
         let path_map = self.path_tree()?;
 
-        let blocks_to_delete = self.meta_store.delete_objects(bucket, object)?;
+        let blocks_to_delete = self.meta_store.delete_objects(bucket, key)?;
 
         // Now delete all the blocks from disk, and unlink them in the path map.
         for block in blocks_to_delete {
