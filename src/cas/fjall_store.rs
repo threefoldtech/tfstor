@@ -77,23 +77,6 @@ impl FjallStore {
             .map_err(|e| MetaError::PersistError(e.to_string()))?;
         Ok(())
     }
-
-    #[allow(dead_code)]
-    pub fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
-        // this fn is only for testing purposes
-        let bmt = self.get_allbuckets_tree()?;
-        bmt.remove(bucket_name.as_bytes())?;
-
-        let bucket = self.get_bucket_ext(bucket_name)?;
-        for key in bucket.get_bucket_keys() {
-            let key = key?;
-            eprintln!("Deleting object {}", std::str::from_utf8(&key).unwrap());
-        }
-
-        self.drop_bucket(bucket_name)?;
-
-        Ok(())
-    }
 }
 
 impl MetaStore for FjallStore {
@@ -167,7 +150,7 @@ impl MetaStore for FjallStore {
     ) -> Result<(), MetaError> {
         let bucket = self.get_partition(bucket_name)?;
         let mut tx = self.keyspace.write_tx();
-        tx.insert(&bucket, key.as_bytes(), raw_obj);
+        tx.insert(&bucket, key, raw_obj);
         self.commit_persist(tx)?;
         Ok(())
     }
@@ -370,42 +353,37 @@ impl BaseMetaTree for FjallTree {
     }
 }
 
-#[derive(Clone)]
-struct KeyIterator {
-    keyspace: Arc<fjall::TxKeyspace>,
-    partition: Arc<fjall::TxPartitionHandle>,
-}
-
-impl KeyIterator {
-    fn new(keyspace: Arc<fjall::TxKeyspace>, partition: Arc<fjall::TxPartitionHandle>) -> Self {
-        Self {
-            keyspace,
-            partition,
-        }
-    }
-}
-
-impl Iterator for KeyIterator {
-    type Item = Result<Vec<u8>, MetaError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let read_tx = self.keyspace.read_tx();
-        read_tx
-            .range::<Vec<u8>, _>(&self.partition, std::ops::RangeFull)
-            .next()
-            .map(|res| {
-                res.map(|(k, _)| k.to_vec())
-                    .map_err(|e| MetaError::OtherDBError(e.to_string()))
-            })
-    }
-}
-
 impl MetaTreeExt for FjallTree {
     fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send> {
-        Box::new(KeyIterator::new(
-            self.keyspace.clone(),
-            self.partition.clone(),
-        ))
+        let partition = self.partition.clone();
+        let keyspace = self.keyspace.clone();
+        let mut last_key: Option<Vec<u8>> = None;
+
+        Box::new(std::iter::from_fn(move || {
+            let read_tx = keyspace.read_tx();
+            let range = match &last_key {
+                Some(k) => {
+                    let mut next = k.clone();
+                    next.push(0);
+                    next..
+                }
+                None => Vec::new()..,
+            };
+
+            read_tx
+                .range::<Vec<u8>, _>(&partition, range)
+                .next()
+                .map(|res| match res {
+                    Ok((k, _)) => {
+                        last_key = Some(k.to_vec());
+                        Ok(k.to_vec())
+                    }
+                    Err(e) => {
+                        tracing::error!("Error reading key: {}", e);
+                        Err(MetaError::OtherDBError(e.to_string()))
+                    }
+                })
+        }))
     }
 
     fn range_filter_skip<'a>(
@@ -497,14 +475,6 @@ mod tests {
         assert_eq!(buckets.len(), 2);
         assert_eq!(buckets[0].name(), bucket_name1);
         assert_eq!(buckets[1].name(), bucket_name2);
-
-        // Test bucket deletion
-        store.bucket_delete(bucket_name1).unwrap();
-        store.bucket_delete(bucket_name2).unwrap();
-
-        // Verify bucket not exists
-        assert_eq!(store.bucket_exists(bucket_name1).unwrap(), false);
-        assert_eq!(store.bucket_exists(bucket_name2).unwrap(), false);
     }
 
     #[test]
@@ -554,5 +524,56 @@ mod tests {
             .insert_bucket(bucket.to_string(), bucket_meta.to_vec())
             .unwrap();
         assert!(store.get_meta_obj(bucket, "nonexistent").is_err());
+    }
+
+    #[test]
+    fn test_get_bucket_keys() {
+        let (store, _dir) = setup_store();
+        let bucket_name = "testbucketkeys";
+
+        // Setup bucket
+        let bucket_meta = BucketMeta::new(bucket_name.to_string());
+        store
+            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .unwrap();
+
+        // Insert test objects
+        let test_keys = vec!["a", "b", "c"];
+        for key in &test_keys {
+            let obj = Object::new(
+                1024,
+                BlockID::from([1; 16]),
+                0,
+                vec![BlockID::from([1; 16])],
+            );
+            store
+                .insert_meta_obj(bucket_name, key, obj.to_vec())
+                .unwrap();
+        }
+
+        let bucket = store.get_bucket_ext(bucket_name).unwrap();
+
+        let retrieved_keys: Vec<String> = bucket
+            .get_bucket_keys()
+            .into_iter()
+            .map(|k| String::from_utf8(k.unwrap()).unwrap())
+            .collect();
+
+        // Verify all keys present
+        assert_eq!(retrieved_keys.len(), test_keys.len());
+        for key in retrieved_keys {
+            assert!(test_keys.contains(&key.as_str()));
+        }
+
+        // Test empty bucket
+        let empty_bucket = "empty-bucket";
+        store
+            .insert_bucket(
+                empty_bucket.to_string(),
+                BucketMeta::new(empty_bucket.to_string()).to_vec(),
+            )
+            .unwrap();
+        let empty = store.get_bucket_ext(empty_bucket).unwrap();
+        assert_eq!(empty.get_bucket_keys().count(), 0);
     }
 }

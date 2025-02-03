@@ -42,6 +42,7 @@ hyper-util = { version = "0.1.9", features = [
 ] }
 rusoto_core = "0.48.0"
 
+
 [profile.release]
 lto = true
 codegen-units = 1
