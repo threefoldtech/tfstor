@@ -412,27 +412,6 @@ impl MetaTreeExt for FjallTree {
                 }),
         )
     }
-    fn range_filter<'a>(
-        &'a self,
-        start_bytes: &'a [u8],
-        prefix_bytes: &'a [u8],
-    ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)> {
-        let read_tx = self.keyspace.read_tx();
-        Box::new(
-            read_tx
-                .range(&self.partition, start_bytes..)
-                .filter_map(|read_result| match read_result {
-                    Err(_) => None,
-                    Ok((k, v)) => Some((k, v)),
-                })
-                .take_while(move |(raw_key, _)| raw_key.starts_with(prefix_bytes))
-                .map(|(raw_key, raw_value)| {
-                    let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
-                    let obj = Object::try_from(&*raw_value).unwrap();
-                    (key, obj)
-                }),
-        )
-    }
 }
 
 impl MetaTree for FjallTree {} // Empty impl as marker
@@ -575,5 +554,71 @@ mod tests {
             .unwrap();
         let empty = store.get_bucket_ext(empty_bucket).unwrap();
         assert_eq!(empty.get_bucket_keys().count(), 0);
+    }
+
+    #[test]
+    fn test_range_filter_skip() {
+        let (store, _dir) = setup_store();
+        let bucket_name = "test-bucket";
+
+        // Setup bucket
+        let bucket_meta = BucketMeta::new(bucket_name.to_string());
+        store
+            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .unwrap();
+
+        // Insert test objects with ordered keys
+        let test_data = vec![
+            ("a/1", "data1"),
+            ("a/2", "data2"),
+            ("b/1", "data3"),
+            ("b/2", "data4"),
+            ("c/1", "data5"),
+        ];
+
+        for (key, data) in &test_data {
+            let obj = Object::new(
+                data.len() as u64,
+                BlockID::from([1; 16]),
+                0,
+                vec![BlockID::from([1; 16])],
+            );
+            store
+                .insert_meta_obj(bucket_name, key, obj.to_vec())
+                .unwrap();
+        }
+
+        let bucket = store.get_bucket_ext(bucket_name).unwrap();
+
+        // Test 1: Full range, no filters
+        let results: Vec<_> = bucket
+            .range_filter_skip(b"", b"", None)
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(results.len(), 5);
+        assert_eq!(results[0], "a/1");
+
+        // Test 2: With start_after
+        let results: Vec<_> = bucket
+            .range_filter_skip(b"", b"", Some("a/2".to_string()))
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0], "b/1");
+
+        // Test 3: With prefix filter
+        let results: Vec<_> = bucket
+            .range_filter_skip(b"b", b"b", None)
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|k| k.starts_with("b/")));
+
+        // Test 4: Empty range
+        let results: Vec<_> = bucket
+            .range_filter_skip(b"z", b"z", None)
+            .map(|(k, _)| k)
+            .collect();
+        assert_eq!(results.len(), 0);
     }
 }

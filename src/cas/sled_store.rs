@@ -356,26 +356,6 @@ impl MetaTreeExt for SledTree {
                 }),
         )
     }
-    fn range_filter<'a>(
-        &'a self,
-        start_bytes: &'a [u8],
-        prefix_bytes: &'a [u8],
-    ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)> {
-        Box::new(
-            self.tree
-                .range(start_bytes..)
-                .filter_map(|read_result| match read_result {
-                    Err(_) => None,
-                    Ok((k, v)) => Some((k, v)),
-                })
-                .take_while(move |(raw_key, _)| raw_key.starts_with(prefix_bytes))
-                .map(|(raw_key, raw_value)| {
-                    let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
-                    let obj = Object::try_from(&*raw_value).unwrap();
-                    (key, obj)
-                }),
-        )
-    }
 }
 
 impl MetaTree for SledTree {} // Empty impl as marker

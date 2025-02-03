@@ -105,11 +105,6 @@ pub trait MetaTreeExt: BaseMetaTree {
         prefix_bytes: &'a [u8],
         start_after: Option<String>,
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)>;
-    fn range_filter<'a>(
-        &'a self,
-        start_bytes: &'a [u8],
-        prefix_bytes: &'a [u8],
-    ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)>;
 }
 
 pub trait MetaTree: BaseMetaTree + MetaTreeExt {}

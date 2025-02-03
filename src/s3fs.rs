@@ -451,7 +451,7 @@ impl S3 for S3FS {
         let prefix_bytes = prefix.as_deref().unwrap_or("").as_bytes();
 
         let mut objects = b
-            .range_filter(start_bytes, prefix_bytes)
+            .range_filter_skip(start_bytes, prefix_bytes, None)
             .map(|(key, obj)| s3s::dto::Object {
                 key: Some(key),
                 e_tag: Some(obj.format_e_tag()),
