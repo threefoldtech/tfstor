@@ -30,7 +30,7 @@ use tokio::sync::MutexGuard;
 use tracing::{debug, error};
 use uuid::Uuid;
 
-const FS_ROOT: &str = concat!(env!("CARGO_TARGET_TMPDIR"), "/s3s-fs-tests-aws");
+const FS_ROOT: &str = concat!(env!("CARGO_TARGET_TMPDIR"), "/s3s-cas-test");
 const DOMAIN_NAME: &str = "localhost:8014";
 const REGION: &str = "us-west-2";
 

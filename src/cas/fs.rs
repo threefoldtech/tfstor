@@ -3,7 +3,7 @@ use std::{io, mem, path::PathBuf};
 
 use super::{
     block::BlockID, bucket_meta::BucketMeta, buffered_byte_stream::BufferedByteStream, fjall_store,
-    meta_errors::MetaError, meta_store, object::Object, sled_store,
+    meta_errors::MetaError, meta_store, object::Object,
 };
 use crate::metrics::SharedMetrics;
 
@@ -69,7 +69,6 @@ pub struct CasFS {
 }
 
 pub enum StorageEngine {
-    Sled,
     Fjall,
 }
 
@@ -83,7 +82,6 @@ impl CasFS {
         meta_path.push("db");
         root.push("blocks");
         let meta_store: Box<dyn meta_store::MetaStore> = match storage_engine {
-            StorageEngine::Sled => Box::new(sled_store::SledStore::new(meta_path)),
             StorageEngine::Fjall => Box::new(fjall_store::FjallStore::new(meta_path)),
         };
 

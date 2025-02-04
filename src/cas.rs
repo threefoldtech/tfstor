@@ -12,4 +12,3 @@ mod fjall_store;
 mod fs;
 pub mod meta_errors;
 pub mod object;
-mod sled_store;

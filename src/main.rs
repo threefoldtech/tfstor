@@ -27,9 +27,6 @@ struct Args {
 
     #[structopt(long, requires("access-key"), display_order = 1000)]
     secret_key: Option<String>,
-
-    #[structopt(long = "sled", parse(from_flag = std::ops::Not::not))]
-    sled: bool,
 }
 
 fn setup_tracing() {
@@ -56,12 +53,8 @@ use s3s::service::S3ServiceBuilder;
 
 #[tokio::main]
 async fn run(args: Args) -> anyhow::Result<()> {
-    info!("args fjall = {}", args.sled);
-    let storage_engine = if args.sled {
-        StorageEngine::Sled
-    } else {
-        StorageEngine::Fjall
-    };
+    let storage_engine = StorageEngine::Fjall;
+
     // provider
     let metrics = s3_cas::metrics::SharedMetrics::new();
     let casfs = CasFS::new(
