@@ -202,9 +202,14 @@ impl CasFS {
 
     /// Save data on the filesystem. A list of block ID's used as keys for the data blocks is
     /// returned, along with the hash of the full byte stream, and the length of the stream.
-    pub async fn store_bytes(&self, data: ByteStream) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
+    pub async fn store_bytes(
+        &self,
+        old_obj_meta: Option<Object>,
+        data: ByteStream,
+    ) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
+        let old_obj_meta = Arc::new(old_obj_meta);
         let block_map = Arc::new(self.meta_store.get_block_tree()?);
-        let path_map = Arc::new(self.path_tree()?);
+
         let (tx, rx) = unbounded();
         let mut content_hash = Md5::new();
         let data = BufferedByteStream::new(data);
@@ -222,15 +227,11 @@ impl CasFS {
                 self.metrics.bytes_received(bytes.len());
             }
         })
-        .zip(stream::repeat((
-            tx,
-            Arc::clone(&block_map),
-            Arc::clone(&path_map),
-        )))
+        .zip(stream::repeat((tx, block_map, old_obj_meta)))
         .enumerate()
         .for_each_concurrent(
             5,
-            |(idx, (maybe_chunk, (mut tx, block_map, path_map)))| async move {
+            |(idx, (maybe_chunk, (mut tx, block_map, old_obj_meta)))| async move {
                 if let Err(e) = maybe_chunk {
                     if let Err(e) = tx
                         .send(Err(std::io::Error::new(e.kind(), e.to_string())))
@@ -246,13 +247,15 @@ impl CasFS {
                 hasher.update(&bytes);
                 let block_hash: BlockID = hasher.finalize().into();
                 let data_len = bytes.len();
+                let key_has_block = if let Some(obj) = old_obj_meta.as_ref() {
+                    obj.has_block(&block_hash)
+                } else {
+                    false
+                };
 
-                let should_write = self.meta_store.write_block_and_path_meta(
-                    Box::new(block_map.clone()),
-                    Box::new(path_map.clone()),
-                    block_hash,
-                    data_len,
-                );
+                let should_write =
+                    self.meta_store
+                        .write_block_and_path_meta(block_hash, data_len, key_has_block);
 
                 let mut pm = PendingMarker::new(self.metrics.clone());
                 match should_write {
@@ -319,5 +322,81 @@ impl CasFS {
             content_hash.finalize().into(),
             size,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use futures::stream;
+    use rusoto_core::ByteStream;
+    use tempfile::tempdir;
+    //use tokio::io::AsyncRead;
+
+    #[tokio::test]
+    async fn test_store_bytes() {
+        // Setup
+        let dir = tempdir().unwrap();
+        let meta_path = dir.path().join("meta");
+        let metrics = crate::metrics::SharedMetrics::new();
+        let fs = CasFS::new(
+            dir.path().to_path_buf(),
+            meta_path,
+            metrics,
+            StorageEngine::Fjall,
+        );
+
+        // Create ByteStream from test data
+        let test_data = b"long test data".repeat(100).to_vec();
+        let test_data_2 = test_data.clone();
+        let test_data_3 = test_data.clone();
+        let test_data_len = test_data.len();
+        let stream = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data.clone())) },
+        ));
+
+        // Store bytes
+        let (block_ids, content_hash, size) = fs.store_bytes(None, stream).await.unwrap();
+
+        // Verify results
+        assert_eq!(size, test_data_len as u64);
+        assert_eq!(block_ids.len(), 1);
+
+        // Verify block was stored
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        let stored_block = block_tree.get_block_obj(&block_ids[0]).unwrap();
+        assert_eq!(stored_block.size(), test_data_len);
+        assert_eq!(stored_block.rc(), 1);
+
+        {
+            // Test with existing object
+            let old_obj = Object::new(test_data_len as u64, content_hash, 0, block_ids.clone());
+
+            let stream =
+                ByteStream::new(stream::once(
+                    async move { Ok(Bytes::from(test_data_2.clone())) },
+                ));
+
+            let (new_blocks, _, _) = fs.store_bytes(Some(old_obj), stream).await.unwrap();
+
+            assert_eq!(new_blocks, block_ids);
+
+            let stored_block = block_tree.get_block_obj(&new_blocks[0]).unwrap();
+            assert_eq!(stored_block.rc(), 1);
+        }
+        {
+            let stream =
+                ByteStream::new(stream::once(
+                    async move { Ok(Bytes::from(test_data_3.clone())) },
+                ));
+
+            let (new_blocks, _, _) = fs.store_bytes(None, stream).await.unwrap();
+
+            assert_eq!(new_blocks, block_ids);
+
+            let stored_block = block_tree.get_block_obj(&new_blocks[0]).unwrap();
+            assert_eq!(stored_block.rc(), 2);
+        }
     }
 }

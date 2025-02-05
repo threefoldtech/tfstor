@@ -58,6 +58,9 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// TODO: we should return the raw bytes and let the caller to deserialize it.
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError>;
 
+    /// key_exists returns true if the key exists in the given bucket.
+    fn key_exists(&self, bucket: &str, key: &str) -> Result<bool, MetaError>;
+
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
@@ -71,10 +74,9 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     // it returns true if the block was not exists
     fn write_block_and_path_meta(
         &self,
-        block_map: Box<dyn BaseMetaTree>,
-        path_map: Box<dyn BaseMetaTree>,
         block_hash: BlockID,
         data_len: usize,
+        key_has_block: bool,
     ) -> Result<bool, MetaError>;
 }
 

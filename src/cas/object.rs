@@ -62,6 +62,10 @@ impl Object {
         &self.blocks
     }
 
+    pub fn has_block(&self, block: &BlockID) -> bool {
+        self.blocks.contains(block)
+    }
+
     pub fn last_modified(&self) -> SystemTime {
         UNIX_EPOCH + std::time::Duration::from_secs(self.ctime as u64)
     }

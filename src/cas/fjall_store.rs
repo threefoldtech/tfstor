@@ -155,6 +155,13 @@ impl MetaStore for FjallStore {
         Ok(())
     }
 
+    fn key_exists(&self, bucket_name: &str, key: &str) -> Result<bool, MetaError> {
+        let bucket = self.get_partition(bucket_name)?;
+        bucket
+            .contains_key(key)
+            .map_err(|e| MetaError::OtherDBError(e.to_string()))
+    }
+
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
         let bucket = self.get_partition(bucket)?;
         let read_tx = self.keyspace.read_tx();
@@ -233,10 +240,9 @@ impl MetaStore for FjallStore {
 
     fn write_block_and_path_meta(
         &self,
-        _block_map: Box<dyn BaseMetaTree>,
-        _path_map: Box<dyn BaseMetaTree>,
         block_hash: BlockID,
         data_len: usize,
+        key_has_block: bool,
     ) -> Result<bool, MetaError> {
         let blocks = self.block_partition.clone();
         let paths = self.path_partition.clone();
@@ -246,13 +252,18 @@ impl MetaStore for FjallStore {
             Ok(Some(block_data)) => {
                 // Block already exists
 
-                // bump refcount on the block
-                let mut block =
-                    Block::try_from(&*block_data).expect("Only valid blocks are stored");
-                block.increment_refcount();
-                // write block back
-                // TODO: this could be done in an `update_and_fetch`
-                tx.insert(&blocks, block_hash, block.to_vec());
+                // if the key already has this block, the block doesn't got more references
+                // and we don't need to write it back.
+                if !key_has_block {
+                    // bump refcount on the block
+                    let mut block =
+                        Block::try_from(&*block_data).expect("Only valid blocks are stored");
+
+                    block.increment_refcount();
+                    // write block back
+                    // TODO: this could be done in an `update_and_fetch`
+                    tx.insert(&blocks, block_hash, block.to_vec());
+                }
 
                 Ok(false)
             }
