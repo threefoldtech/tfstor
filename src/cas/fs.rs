@@ -200,9 +200,16 @@ impl CasFS {
         Ok(())
     }
 
-    /// Save data on the filesystem. A list of block ID's used as keys for the data blocks is
+    /// Save the stream of bytes to disk.
+    ///
+    /// old_obj_meta is an optional Object that is Some if the key already exists in the metadata.
+    ///
+    /// The data is streamed in chunks, and each chunk is hashed and stored on disk.
+    /// The hash of each chunk is used as a key to store the data in the database.
+    ///
+    /// A list of block ID's used as keys for the data blocks is
     /// returned, along with the hash of the full byte stream, and the length of the stream.
-    pub async fn store_bytes(
+    pub async fn store_object(
         &self,
         old_obj_meta: Option<Object>,
         data: ByteStream,
@@ -330,34 +337,41 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use futures::stream;
+    use once_cell::sync::Lazy;
     use rusoto_core::ByteStream;
     use tempfile::tempdir;
-    //use tokio::io::AsyncRead;
 
-    #[tokio::test]
-    async fn test_store_bytes() {
-        // Setup
+    static METRICS: Lazy<SharedMetrics> = Lazy::new(|| SharedMetrics::new());
+
+    fn setup_test_fs() -> (CasFS, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let meta_path = dir.path().join("meta");
-        let metrics = crate::metrics::SharedMetrics::new();
+        let metrics = METRICS.clone();
+
         let fs = CasFS::new(
             dir.path().to_path_buf(),
             meta_path,
             metrics,
             StorageEngine::Fjall,
         );
+        (fs, dir)
+    }
+
+    #[tokio::test]
+    async fn test_store_object() {
+        // Setup
+        let (fs, _dir) = setup_test_fs();
 
         // Create ByteStream from test data
         let test_data = b"long test data".repeat(100).to_vec();
         let test_data_2 = test_data.clone();
-        let test_data_3 = test_data.clone();
         let test_data_len = test_data.len();
         let stream = ByteStream::new(stream::once(
             async move { Ok(Bytes::from(test_data.clone())) },
         ));
 
         // Store bytes
-        let (block_ids, content_hash, size) = fs.store_bytes(None, stream).await.unwrap();
+        let (block_ids, _, size) = fs.store_object(None, stream).await.unwrap();
 
         // Verify results
         assert_eq!(size, test_data_len as u64);
@@ -369,8 +383,47 @@ mod tests {
         assert_eq!(stored_block.size(), test_data_len);
         assert_eq!(stored_block.rc(), 1);
 
+        // Store the same data again
+        // - The same block should be returned
+        // - The refcount should be increased
+
+        let stream = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data_2.clone())) },
+        ));
+
+        let (new_blocks, _, _) = fs.store_object(None, stream).await.unwrap();
+
+        assert_eq!(new_blocks, block_ids);
+
+        let stored_block = block_tree.get_block_obj(&new_blocks[0]).unwrap();
+        assert_eq!(stored_block.rc(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_store_object_refcount() {
+        // Setup
+        let (fs, _dir) = setup_test_fs();
+
+        // Create ByteStream from test data
+        let test_data = b"long test data".repeat(100).to_vec();
+        let test_data_2 = test_data.clone();
+        let test_data_3 = test_data.clone();
+        let test_data_len = test_data.len();
+        let stream = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data.clone())) },
+        ));
+
+        // Store bytes
+        let (block_ids, content_hash, _) = fs.store_object(None, stream).await.unwrap();
+
+        // Initial refcount must be 1
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        let stored_block = block_tree.get_block_obj(&block_ids[0]).unwrap();
+        assert_eq!(stored_block.rc(), 1);
+
         {
-            // Test with existing object
+            // Test using old_obj, which means using the same key
+            // Refcount must not be increased
             let old_obj = Object::new(test_data_len as u64, content_hash, 0, block_ids.clone());
 
             let stream =
@@ -378,7 +431,7 @@ mod tests {
                     async move { Ok(Bytes::from(test_data_2.clone())) },
                 ));
 
-            let (new_blocks, _, _) = fs.store_bytes(Some(old_obj), stream).await.unwrap();
+            let (new_blocks, _, _) = fs.store_object(Some(old_obj), stream).await.unwrap();
 
             assert_eq!(new_blocks, block_ids);
 
@@ -386,12 +439,14 @@ mod tests {
             assert_eq!(stored_block.rc(), 1);
         }
         {
+            // Test without old_obj, which means using a new key
+            // Refcount must be increased
             let stream =
                 ByteStream::new(stream::once(
                     async move { Ok(Bytes::from(test_data_3.clone())) },
                 ));
 
-            let (new_blocks, _, _) = fs.store_bytes(None, stream).await.unwrap();
+            let (new_blocks, _, _) = fs.store_object(None, stream).await.unwrap();
 
             assert_eq!(new_blocks, block_ids);
 
