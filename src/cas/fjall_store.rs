@@ -282,15 +282,8 @@ impl MetaStore for FjallStore {
             }
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         };
-        match should_write {
-            Ok(should_write) => {
-                if should_write {
-                    self.commit_persist(tx)?;
-                }
-                Ok(should_write)
-            }
-            Err(e) => Err(e),
-        }
+        self.commit_persist(tx)?;
+        should_write
     }
 }
 

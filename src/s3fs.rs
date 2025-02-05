@@ -504,25 +504,12 @@ impl S3 for S3FS {
 
         let b = try_!(self.casfs.get_bucket(&bucket));
 
-        let key_count = max_keys
-            .map(|mk| if mk > MAX_KEYS { MAX_KEYS } else { mk })
-            .unwrap_or(MAX_KEYS);
+        // max number of keys to return
+        let requested_keys = max_keys.unwrap_or(MAX_KEYS);
+        let key_count = std::cmp::min(requested_keys, MAX_KEYS);
 
-        let token = if let Some(ref rt) = continuation_token {
-            let mut out = vec![0; rt.len() / 2];
-            if hex_decode(rt.as_bytes(), &mut out).is_err() {
-                return Err(s3_error!(
-                    InvalidToken,
-                    "continuation token has an invalid format"
-                ));
-            };
-            match String::from_utf8(out) {
-                Ok(s) => Some(s),
-                Err(_) => return Err(s3_error!(InvalidToken, "continuation token is invalid")),
-            }
-        } else {
-            None
-        };
+        // continuation token
+        let token = decode_continuation_token(continuation_token.as_deref())?;
 
         let start_bytes = if let Some(ref token) = token {
             token.as_bytes()
@@ -683,4 +670,22 @@ impl S3 for S3FS {
 // Add helper function
 fn convert_stream_error(body: StreamingBlob) -> impl Stream<Item = Result<Bytes, io::Error>> {
     body.map(|r| r.map_err(|e| io::Error::new(ErrorKind::Other, e.to_string())))
+}
+
+fn decode_continuation_token(rt: Option<&str>) -> Result<Option<String>, s3s::S3Error> {
+    if let Some(rt) = rt {
+        let mut out = vec![0; rt.len() / 2];
+        if hex_decode(rt.as_bytes(), &mut out).is_err() {
+            return Err(s3_error!(
+                InvalidToken,
+                "continuation token has an invalid format"
+            ));
+        };
+
+        String::from_utf8(out)
+            .map(Some)
+            .map_err(|_| s3_error!(InvalidToken, "continuation token is invalid"))
+    } else {
+        Ok(None)
+    }
 }
