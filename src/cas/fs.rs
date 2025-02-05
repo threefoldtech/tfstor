@@ -169,6 +169,11 @@ impl CasFS {
         Ok(())
     }
 
+    pub fn key_exists(&self, bucket: &str, key: &str) -> Result<bool, MetaError> {
+        let bucket = self.get_bucket(bucket)?;
+        bucket.contains_key(key.as_bytes())
+    }
+
     /// Get a list of all buckets in the system.
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         self.meta_store.list_buckets()
@@ -389,11 +394,18 @@ mod tests {
         assert_eq!(size, test_data_len as u64);
         assert_eq!(block_ids.len(), 1);
 
-        // Verify block was stored
+        // Verify block & path was stored
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         let stored_block = block_tree.get_block_obj(&block_ids[0]).unwrap();
         assert_eq!(stored_block.size(), test_data_len);
         assert_eq!(stored_block.rc(), 1);
+        assert_eq!(
+            fs.path_tree()
+                .unwrap()
+                .contains_key(stored_block.path())
+                .unwrap(),
+            true
+        );
 
         // Store the same data again with different key
         // - The same block should be returned
@@ -481,4 +493,70 @@ mod tests {
             assert_eq!(stored_block.rc(), 2);
         }
     }
+
+    // test store and delete object
+    // - store an object
+    // - delete the object
+    #[tokio::test]
+    async fn test_store_and_delete_object() {
+        let (fs, _dir) = setup_test_fs();
+        let bucket_name = "test-bucket";
+        let key = "test/key";
+
+        // Create bucket
+        fs.create_bucket(bucket_name.to_string()).unwrap();
+
+        // Create test data and stream
+        let test_data = b"test data".to_vec();
+        let stream = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data.clone())) },
+        ));
+
+        // Store object
+        let (block_ids, content_hash, size) =
+            fs.store_object(bucket_name, key, stream).await.unwrap();
+        fs.create_object_meta(bucket_name, key, size, content_hash, 0, block_ids.clone())
+            .unwrap();
+
+        // Verify object exists
+        let exists = fs.key_exists(bucket_name, key).unwrap();
+        assert_eq!(exists, true);
+
+        // verify blocks and path exist
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        let mut stored_paths = Vec::new();
+        for id in block_ids.clone() {
+            let block = block_tree.get_block_obj(&id).unwrap();
+            assert_eq!(
+                fs.path_tree().unwrap().contains_key(block.path()).unwrap(),
+                true
+            );
+            stored_paths.push(block.path().to_vec());
+        }
+
+        // Delete object
+        fs.delete_object(bucket_name, key).await.unwrap();
+
+        // Verify object no longer exists
+        let exists = fs.key_exists(bucket_name, key).unwrap();
+        assert_eq!(exists, false);
+
+        // Verify blocks were cleaned up
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        for id in block_ids {
+            assert!(block_tree.get_block_obj(&id).is_err());
+        }
+        // Verify paths were cleaned up
+        for path in stored_paths {
+            assert_eq!(fs.path_tree().unwrap().contains_key(&path).unwrap(), false);
+        }
+    }
+
+    // Test storing and deleting an object with refcount
+    // - store object
+    // - store object again with differrent key
+    // - delete the first object
+    // - check block/disk/whatever is still there
+    // - delete the second object
+    // - check block/disk/whatever should be gone
 }

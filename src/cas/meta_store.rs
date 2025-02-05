@@ -58,9 +58,6 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// TODO: we should return the raw bytes and let the caller to deserialize it.
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError>;
 
-    /// key_exists returns true if the key exists in the given bucket.
-    fn key_exists(&self, bucket: &str, key: &str) -> Result<bool, MetaError>;
-
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
@@ -88,6 +85,8 @@ pub trait BaseMetaTree: Send + Sync {
 
     /// remove removes a key from the tree.
     fn remove(&self, key: &[u8]) -> Result<(), MetaError>;
+
+    fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError>;
 
     /// get_block_obj returns the `Object` for the given key.
     fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError>;
@@ -123,6 +122,11 @@ impl<T: ?Sized + BaseMetaTree> BaseMetaTree for Box<T> {
     fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
         (**self).remove(key)
     }
+
+    fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError> {
+        (**self).contains_key(key)
+    }
+
     fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError> {
         (**self).get_block_obj(key)
     }
@@ -144,6 +148,10 @@ impl<T: ?Sized + BaseMetaTree> BaseMetaTree for Arc<T> {
 
     fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
         (**self).remove(key)
+    }
+
+    fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError> {
+        (**self).contains_key(key)
     }
 
     fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError> {

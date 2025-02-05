@@ -155,13 +155,6 @@ impl MetaStore for FjallStore {
         Ok(())
     }
 
-    fn key_exists(&self, bucket_name: &str, key: &str) -> Result<bool, MetaError> {
-        let bucket = self.get_partition(bucket_name)?;
-        bucket
-            .contains_key(key)
-            .map_err(|e| MetaError::OtherDBError(e.to_string()))
-    }
-
     fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
         let bucket = self.get_partition(bucket)?;
         let read_tx = self.keyspace.read_tx();
@@ -336,6 +329,13 @@ impl BaseMetaTree for FjallTree {
         match self.partition.remove(key) {
             Ok(_) => Ok(()),
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+        }
+    }
+
+    fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError> {
+        match self.partition.contains_key(key) {
+            Ok(v) => Ok(v),
+            Err(_) => Err(MetaError::KeyNotFound),
         }
     }
 
