@@ -211,9 +211,14 @@ impl CasFS {
     /// returned, along with the hash of the full byte stream, and the length of the stream.
     pub async fn store_object(
         &self,
-        old_obj_meta: Option<Object>,
+        bucket_name: &str,
+        key: &str,
         data: ByteStream,
     ) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
+        let old_obj_meta = match self.meta_store.get_meta_obj(bucket_name, key) {
+            Ok(obj_meta) => Some(obj_meta),
+            Err(_) => None,
+        };
         let old_obj_meta = Arc::new(old_obj_meta);
         let block_map = Arc::new(self.meta_store.get_block_tree()?);
 
@@ -361,6 +366,10 @@ mod tests {
     async fn test_store_object() {
         // Setup
         let (fs, _dir) = setup_test_fs();
+        let bucket_name = "test_bucket";
+        let key1 = "test_key1";
+        let key2 = "test_key2";
+        fs.create_bucket(bucket_name.to_string()).unwrap();
 
         // Create ByteStream from test data
         let test_data = b"long test data".repeat(100).to_vec();
@@ -370,8 +379,11 @@ mod tests {
             async move { Ok(Bytes::from(test_data.clone())) },
         ));
 
-        // Store bytes
-        let (block_ids, _, size) = fs.store_object(None, stream).await.unwrap();
+        // Store object
+        let (block_ids, content_hash, size) =
+            fs.store_object(bucket_name, key1, stream).await.unwrap();
+        fs.create_object_meta(bucket_name, key1, size, content_hash, 0, block_ids.clone())
+            .unwrap();
 
         // Verify results
         assert_eq!(size, test_data_len as u64);
@@ -383,7 +395,7 @@ mod tests {
         assert_eq!(stored_block.size(), test_data_len);
         assert_eq!(stored_block.rc(), 1);
 
-        // Store the same data again
+        // Store the same data again with different key
         // - The same block should be returned
         // - The refcount should be increased
 
@@ -391,7 +403,10 @@ mod tests {
             async move { Ok(Bytes::from(test_data_2.clone())) },
         ));
 
-        let (new_blocks, _, _) = fs.store_object(None, stream).await.unwrap();
+        let (new_blocks, content_hash, size) =
+            fs.store_object(bucket_name, key2, stream).await.unwrap();
+        fs.create_object_meta(bucket_name, key2, size, content_hash, 0, new_blocks.clone())
+            .unwrap();
 
         assert_eq!(new_blocks, block_ids);
 
@@ -404,17 +419,24 @@ mod tests {
         // Setup
         let (fs, _dir) = setup_test_fs();
 
+        let bucket_name = "test_bucket";
+        let key1 = "test_key1";
+        let key2 = "test_key2";
+        fs.create_bucket(bucket_name.to_string()).unwrap();
+
         // Create ByteStream from test data
         let test_data = b"long test data".repeat(100).to_vec();
         let test_data_2 = test_data.clone();
         let test_data_3 = test_data.clone();
-        let test_data_len = test_data.len();
         let stream = ByteStream::new(stream::once(
             async move { Ok(Bytes::from(test_data.clone())) },
         ));
 
-        // Store bytes
-        let (block_ids, content_hash, _) = fs.store_object(None, stream).await.unwrap();
+        // Store object
+        let (block_ids, content_hash, size) =
+            fs.store_object(bucket_name, key1, stream).await.unwrap();
+        fs.create_object_meta(bucket_name, key1, size, content_hash, 0, block_ids.clone())
+            .unwrap();
 
         // Initial refcount must be 1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
@@ -422,16 +444,18 @@ mod tests {
         assert_eq!(stored_block.rc(), 1);
 
         {
-            // Test using old_obj, which means using the same key
+            // Test using  the same key
             // Refcount must not be increased
-            let old_obj = Object::new(test_data_len as u64, content_hash, 0, block_ids.clone());
 
             let stream =
                 ByteStream::new(stream::once(
                     async move { Ok(Bytes::from(test_data_2.clone())) },
                 ));
 
-            let (new_blocks, _, _) = fs.store_object(Some(old_obj), stream).await.unwrap();
+            let (new_blocks, content_hash, size) =
+                fs.store_object(bucket_name, key1, stream).await.unwrap();
+            fs.create_object_meta(bucket_name, key1, size, content_hash, 0, new_blocks.clone())
+                .unwrap();
 
             assert_eq!(new_blocks, block_ids);
 
@@ -439,14 +463,17 @@ mod tests {
             assert_eq!(stored_block.rc(), 1);
         }
         {
-            // Test without old_obj, which means using a new key
+            // Test  using a new key
             // Refcount must be increased
             let stream =
                 ByteStream::new(stream::once(
                     async move { Ok(Bytes::from(test_data_3.clone())) },
                 ));
 
-            let (new_blocks, _, _) = fs.store_object(None, stream).await.unwrap();
+            let (new_blocks, content_hash, size) =
+                fs.store_object(bucket_name, key2, stream).await.unwrap();
+            fs.create_object_meta(bucket_name, key2, size, content_hash, 0, new_blocks.clone())
+                .unwrap();
 
             assert_eq!(new_blocks, block_ids);
 

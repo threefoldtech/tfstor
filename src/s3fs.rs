@@ -587,16 +587,11 @@ impl S3 for S3FS {
             return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
         }
 
-        let old_obj_meta = match self.casfs.get_object_meta(&bucket, &key) {
-            Ok(obj_meta) => Some(obj_meta),
-            Err(_) => None,
-        };
-
         // save the data
         let converted_stream = convert_stream_error(body);
         let byte_stream =
             ByteStream::new_with_size(converted_stream, content_length.unwrap() as usize);
-        let (blocks, hash, size) = try_!(self.casfs.store_object(old_obj_meta, byte_stream).await);
+        let (blocks, hash, size) = try_!(self.casfs.store_object(&bucket, &key, byte_stream).await);
 
         let obj_meta = try_!(self
             .casfs
@@ -637,7 +632,7 @@ impl S3 for S3FS {
 
         let converted_stream = convert_stream_error(body);
         let byte_stream = ByteStream::new_with_size(converted_stream, content_length as usize);
-        let (blocks, hash, size) = try_!(self.casfs.store_object(None, byte_stream).await);
+        let (blocks, hash, size) = try_!(self.casfs.store_object(&bucket, &key, byte_stream).await);
 
         if size != content_length as u64 {
             return Err(s3_error!(
