@@ -205,6 +205,20 @@ impl CasFS {
         Ok(())
     }
 
+    // convenient function to store an object to disk and then store it's metada
+    pub async fn store_object_with_meta(
+        &self,
+        bucket_name: &str,
+        key: &str,
+        data: ByteStream,
+    ) -> io::Result<(Object, Vec<BlockID>, BlockID, u64)> {
+        let (blocks, content_hash, size) = self.store_object(bucket_name, key, data).await?;
+        let obj = self
+            .create_object_meta(bucket_name, key, size, content_hash, 0, blocks.clone())
+            .unwrap();
+        Ok((obj, blocks, content_hash, size))
+    }
+
     /// Save the stream of bytes to disk.
     ///
     /// old_obj_meta is an optional Object that is Some if the key already exists in the metadata.
@@ -385,9 +399,9 @@ mod tests {
         ));
 
         // Store object
-        let (block_ids, content_hash, size) =
-            fs.store_object(bucket_name, key1, stream).await.unwrap();
-        fs.create_object_meta(bucket_name, key1, size, content_hash, 0, block_ids.clone())
+        let (_, block_ids, _, size) = fs
+            .store_object_with_meta(bucket_name, key1, stream)
+            .await
             .unwrap();
 
         // Verify results
@@ -415,9 +429,9 @@ mod tests {
             async move { Ok(Bytes::from(test_data_2.clone())) },
         ));
 
-        let (new_blocks, content_hash, size) =
-            fs.store_object(bucket_name, key2, stream).await.unwrap();
-        fs.create_object_meta(bucket_name, key2, size, content_hash, 0, new_blocks.clone())
+        let (_, new_blocks, _, _) = fs
+            .store_object_with_meta(bucket_name, key2, stream)
+            .await
             .unwrap();
 
         assert_eq!(new_blocks, block_ids);
@@ -445,9 +459,9 @@ mod tests {
         ));
 
         // Store object
-        let (block_ids, content_hash, size) =
-            fs.store_object(bucket_name, key1, stream).await.unwrap();
-        fs.create_object_meta(bucket_name, key1, size, content_hash, 0, block_ids.clone())
+        let (_, block_ids, _, _) = fs
+            .store_object_with_meta(bucket_name, key1, stream)
+            .await
             .unwrap();
 
         // Initial refcount must be 1
@@ -464,9 +478,9 @@ mod tests {
                     async move { Ok(Bytes::from(test_data_2.clone())) },
                 ));
 
-            let (new_blocks, content_hash, size) =
-                fs.store_object(bucket_name, key1, stream).await.unwrap();
-            fs.create_object_meta(bucket_name, key1, size, content_hash, 0, new_blocks.clone())
+            let (_, new_blocks, _, _) = fs
+                .store_object_with_meta(bucket_name, key1, stream)
+                .await
                 .unwrap();
 
             assert_eq!(new_blocks, block_ids);
@@ -482,9 +496,9 @@ mod tests {
                     async move { Ok(Bytes::from(test_data_3.clone())) },
                 ));
 
-            let (new_blocks, content_hash, size) =
-                fs.store_object(bucket_name, key2, stream).await.unwrap();
-            fs.create_object_meta(bucket_name, key2, size, content_hash, 0, new_blocks.clone())
+            let (_, new_blocks, _, _) = fs
+                .store_object_with_meta(bucket_name, key2, stream)
+                .await
                 .unwrap();
 
             assert_eq!(new_blocks, block_ids);
@@ -513,9 +527,9 @@ mod tests {
         ));
 
         // Store object
-        let (block_ids, content_hash, size) =
-            fs.store_object(bucket_name, key, stream).await.unwrap();
-        fs.create_object_meta(bucket_name, key, size, content_hash, 0, block_ids.clone())
+        let (_, block_ids, _, _) = fs
+            .store_object_with_meta(bucket_name, key, stream)
+            .await
             .unwrap();
 
         // Verify object exists

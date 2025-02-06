@@ -591,11 +591,11 @@ impl S3 for S3FS {
         let converted_stream = convert_stream_error(body);
         let byte_stream =
             ByteStream::new_with_size(converted_stream, content_length.unwrap() as usize);
-        let (blocks, hash, size) = try_!(self.casfs.store_object(&bucket, &key, byte_stream).await);
-
-        let obj_meta = try_!(self
-            .casfs
-            .create_object_meta(&bucket, &key, size, hash, 0, blocks));
+        let (obj_meta, _, _, _) = try_!(
+            self.casfs
+                .store_object_with_meta(&bucket, &key, byte_stream)
+                .await
+        );
 
         let output = PutObjectOutput {
             e_tag: Some(obj_meta.format_e_tag()),
