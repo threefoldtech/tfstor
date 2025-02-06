@@ -206,7 +206,7 @@ impl CasFS {
     }
 
     // convenient function to store an object to disk and then store it's metada
-    pub async fn store_object_with_meta(
+    pub async fn store_object_and_meta(
         &self,
         bucket_name: &str,
         key: &str,
@@ -400,7 +400,7 @@ mod tests {
 
         // Store object
         let (_, block_ids, _, size) = fs
-            .store_object_with_meta(bucket_name, key1, stream)
+            .store_object_and_meta(bucket_name, key1, stream)
             .await
             .unwrap();
 
@@ -430,7 +430,7 @@ mod tests {
         ));
 
         let (_, new_blocks, _, _) = fs
-            .store_object_with_meta(bucket_name, key2, stream)
+            .store_object_and_meta(bucket_name, key2, stream)
             .await
             .unwrap();
 
@@ -460,7 +460,7 @@ mod tests {
 
         // Store object
         let (_, block_ids, _, _) = fs
-            .store_object_with_meta(bucket_name, key1, stream)
+            .store_object_and_meta(bucket_name, key1, stream)
             .await
             .unwrap();
 
@@ -479,7 +479,7 @@ mod tests {
                 ));
 
             let (_, new_blocks, _, _) = fs
-                .store_object_with_meta(bucket_name, key1, stream)
+                .store_object_and_meta(bucket_name, key1, stream)
                 .await
                 .unwrap();
 
@@ -497,7 +497,7 @@ mod tests {
                 ));
 
             let (_, new_blocks, _, _) = fs
-                .store_object_with_meta(bucket_name, key2, stream)
+                .store_object_and_meta(bucket_name, key2, stream)
                 .await
                 .unwrap();
 
@@ -528,7 +528,7 @@ mod tests {
 
         // Store object
         let (_, block_ids, _, _) = fs
-            .store_object_with_meta(bucket_name, key, stream)
+            .store_object_and_meta(bucket_name, key, stream)
             .await
             .unwrap();
 
@@ -568,9 +568,144 @@ mod tests {
 
     // Test storing and deleting an object with refcount
     // - store object
+    //       refcount == 1
     // - store object again with differrent key
+    //      refcount == 2
     // - delete the first object
     // - check block/disk/whatever is still there
     // - delete the second object
     // - check block/disk/whatever should be gone
+    #[tokio::test]
+    async fn test_store_and_delete_object_with_refcount_same_blocks_diffkey() {
+        let (fs, _dir) = setup_test_fs();
+        let bucket = "test-bucket";
+        let key1 = "test/key1";
+        let key2 = "test/key2";
+
+        // Create bucket
+        fs.create_bucket(bucket.to_string()).unwrap();
+
+        // Create test data
+        let test_data = b"test data".to_vec();
+        let test_data2 = test_data.clone();
+        let stream1 = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data.clone())) },
+        ));
+
+        // Store first object
+        let (_, block_ids1, content_hash1, _) = fs
+            .store_object_and_meta(bucket, key1, stream1)
+            .await
+            .unwrap();
+        // Verify blocks  exist with rc=1
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        for id in &block_ids1 {
+            let block = block_tree.get_block_obj(id).unwrap();
+            assert_eq!(block.rc(), 1);
+        }
+
+        // Store same data with different key
+
+        let stream2 = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data2.clone())) },
+        ));
+
+        let (_, block_ids2, content_hash2, _) = fs
+            .store_object_and_meta(bucket, key2, stream2)
+            .await
+            .unwrap();
+
+        // Verify both objects share same blocks
+        assert_eq!(block_ids1, block_ids2);
+        assert_eq!(content_hash1, content_hash2);
+        // Verify blocks  exist with rc=2
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        for id in &block_ids2 {
+            let block = block_tree.get_block_obj(id).unwrap();
+            assert_eq!(block.rc(), 2);
+        }
+
+        // Delete first object
+        fs.delete_object(bucket, key1).await.unwrap();
+
+        // Verify blocks still exist
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        for id in &block_ids1 {
+            let block = block_tree.get_block_obj(id).unwrap();
+            assert_eq!(block.rc(), 1);
+        }
+
+        // Delete second object
+        fs.delete_object(bucket, key2).await.unwrap();
+
+        // Verify blocks are gone
+        for id in block_ids1 {
+            assert!(block_tree.get_block_obj(&id).is_err());
+        }
+    }
+
+    // Test storing and deleting an object with refcount
+    // - store object
+    //       refcount == 1
+    // - store object again with differrent key
+    //      refcount == 1
+    // - delete the object
+    // - check block/disk/whatever should be gone
+    #[tokio::test]
+    async fn test_store_and_delete_object_with_refcount_same_blocks_samekey() {
+        let (fs, _dir) = setup_test_fs();
+        let bucket = "test-bucket";
+        let key1 = "test/key1";
+
+        // Create bucket
+        fs.create_bucket(bucket.to_string()).unwrap();
+
+        // Create test data
+        let test_data = b"test data".to_vec();
+        let test_data2 = test_data.clone();
+        let stream1 = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data.clone())) },
+        ));
+
+        // Store first object
+        let (_, block_ids1, content_hash1, _) = fs
+            .store_object_and_meta(bucket, key1, stream1)
+            .await
+            .unwrap();
+        // Verify blocks  exist with rc=1
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        for id in &block_ids1 {
+            let block = block_tree.get_block_obj(id).unwrap();
+            assert_eq!(block.rc(), 1);
+        }
+
+        // Store same data with same key
+
+        let stream2 = ByteStream::new(stream::once(
+            async move { Ok(Bytes::from(test_data2.clone())) },
+        ));
+
+        let (_, block_ids2, content_hash2, _) = fs
+            .store_object_and_meta(bucket, key1, stream2)
+            .await
+            .unwrap();
+
+        // Verify both objects share same blocks
+        assert_eq!(block_ids1, block_ids2);
+        assert_eq!(content_hash1, content_hash2);
+        // Verify blocks  exist with rc=2
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        for id in &block_ids2 {
+            let block = block_tree.get_block_obj(id).unwrap();
+            assert_eq!(block.rc(), 1);
+        }
+
+        // Delete object
+        fs.delete_object(bucket, key1).await.unwrap();
+
+        // Verify blocks are gone
+        for id in block_ids1 {
+            assert!(block_tree.get_block_obj(&id).is_err());
+        }
+    }
 }

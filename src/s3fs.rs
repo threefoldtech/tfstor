@@ -593,7 +593,7 @@ impl S3 for S3FS {
             ByteStream::new_with_size(converted_stream, content_length.unwrap() as usize);
         let (obj_meta, _, _, _) = try_!(
             self.casfs
-                .store_object_with_meta(&bucket, &key, byte_stream)
+                .store_object_and_meta(&bucket, &key, byte_stream)
                 .await
         );
 
