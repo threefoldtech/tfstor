@@ -394,7 +394,8 @@ impl MetaTreeExt for FjallTree {
     // 1. continuation_token and start_after exists: use the one with the highest lexicographical order
     //    -> call it: ctsa
     // 2. if prefix exists
-    //    -> ctsa > the prefix: return zero results
+    //    -> ctsa > the prefix && doesn't have prefix: return zero results
+    //    -> ctsa < prefix: ignore it
     //    -> ctsa has the prefix: use it as start_after
     //          In kv store like fjall & Sled: we process it in the Rust code
     fn range_filter<'a>(
@@ -403,20 +404,33 @@ impl MetaTreeExt for FjallTree {
         prefix: Option<String>,
         continuation_token: Option<String>,
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)> {
-        let ctsa = match (continuation_token, start_after) {
+        let mut ctsa = match (continuation_token, start_after) {
             (Some(token), Some(start)) => Some(std::cmp::max(token, start)),
             (Some(token), None) => Some(token),
             (None, start) => start,
         };
+        if ctsa.is_some() && prefix.is_some() {
+            eprintln!(
+                "ctsa: {:?}, prefix: {:?}, ctsa > prefix:{}",
+                ctsa.clone(),
+                prefix.clone(),
+                ctsa > prefix,
+            );
+        }
 
         let read_tx = self.keyspace.read_tx();
 
         let base_iter: Box<
             dyn Iterator<Item = Result<(fjall::Slice, fjall::Slice), fjall::Error>>,
         > = match (prefix.as_ref(), ctsa.as_ref()) {
-            (Some(prefix), Some(ctsa)) if ctsa > prefix => {
-                // Return empty iterator if ctsa is after prefix
+            (Some(prefix), Some(ctsa)) if (ctsa > prefix && !ctsa.starts_with(prefix)) => {
+                //Return empty iterator if ctsa is after prefix
                 Box::new(std::iter::empty())
+            }
+            (Some(prefix), Some(ctsa_local)) if ctsa_local < prefix => {
+                // If ctsa is before prefix, ignore ctsa
+                ctsa = None;
+                Box::new(read_tx.prefix(&self.partition, prefix.as_bytes()))
             }
             (Some(prefix), _) => Box::new(read_tx.prefix(&self.partition, prefix.as_bytes())),
             (None, Some(ctsa)) => {
@@ -623,45 +637,91 @@ mod tests {
         let bucket = store.get_bucket_ext(bucket_name).unwrap();
 
         // Test cases
+        {
+            // 1. No filters
+            let results: Vec<_> = bucket
+                .range_filter(None, None, None)
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 5);
+            assert_eq!(results[0], "a/1");
+        }
 
-        // 1. No filters
-        let results: Vec<_> = bucket
-            .range_filter(None, None, None)
-            .map(|(k, _)| k)
-            .collect();
-        assert_eq!(results.len(), 5);
-        assert_eq!(results[0], "a/1");
+        {
+            // 2. With start_after
+            let results: Vec<_> = bucket
+                .range_filter(Some("a/2".to_string()), None, None)
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 3);
+            assert_eq!(results[0], "b/1");
+        }
 
-        // 2. With start_after
-        let results: Vec<_> = bucket
-            .range_filter(Some("a/2".to_string()), None, None)
-            .map(|(k, _)| k)
-            .collect();
-        //assert_eq!(results.len(), 3);
-        assert_eq!(results[0], "b/1");
+        {
+            // 3. With prefix
+            let results: Vec<_> = bucket
+                .range_filter(None, Some("b".to_string()), None)
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 2);
+            assert!(results.iter().all(|k| k.starts_with("b/")));
+        }
 
-        // 3. With prefix
-        let results: Vec<_> = bucket
-            .range_filter(None, Some("b".to_string()), None)
-            .map(|(k, _)| k)
-            .collect();
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|k| k.starts_with("b/")));
+        {
+            // 4. With continuation token
+            let results: Vec<_> = bucket
+                .range_filter(None, None, Some("b/1".to_string()))
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 2);
+            assert_eq!(results[0], "b/2");
+        }
 
-        // 4. With continuation token
-        let results: Vec<_> = bucket
-            .range_filter(None, None, Some("b/1".to_string()))
-            .map(|(k, _)| k)
-            .collect();
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0], "b/2");
+        {
+            // 5. With both start_after and continuation token
+            let results: Vec<_> = bucket
+                .range_filter(Some("b/1".to_string()), None, Some("a/2".to_string()))
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 2);
+            assert_eq!(results[0], "b/2");
+        }
+        {
+            // if start_after/continuation_token is greater than prefix, return empty
 
-        // 5. With both start_after and continuation token
-        let results: Vec<_> = bucket
-            .range_filter(Some("b/1".to_string()), None, Some("a/2".to_string()))
-            .map(|(k, _)| k)
-            .collect();
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0], "b/2");
+            // it is clearly greater than prefix
+            let results: Vec<_> = bucket
+                .range_filter(None, Some("b".to_string()), Some("c".to_string()))
+                .map(|(k, _)| k)
+                .collect();
+
+            assert_eq!(results.len(), 0);
+
+            // token < prefix, can be discarded
+            let results: Vec<_> = bucket
+                .range_filter(None, Some("b/".to_string()), Some("b".to_string()))
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 2);
+            assert_eq!(results[0], "b/1");
+            assert_eq!(results[1], "b/2");
+
+            // token has prefix, token > prefix
+            let results: Vec<_> = bucket
+                .range_filter(None, Some("b/".to_string()), Some("b/0".to_string()))
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 2);
+            assert_eq!(results[0], "b/1");
+            assert_eq!(results[1], "b/2");
+
+            // token has prefix, token > prefix
+            let results: Vec<_> = bucket
+                .range_filter(None, Some("b/".to_string()), Some("b/1".to_string()))
+                .map(|(k, _)| k)
+                .collect();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0], "b/2");
+        }
     }
 }
