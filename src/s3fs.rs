@@ -441,17 +441,8 @@ impl S3 for S3FS {
 
         let b = try_!(self.casfs.get_bucket(&bucket));
 
-        let start_bytes = if let Some(ref marker) = marker {
-            marker.as_bytes()
-        } else if let Some(ref prefix) = prefix {
-            prefix.as_bytes()
-        } else {
-            &[]
-        };
-        let prefix_bytes = prefix.as_deref().unwrap_or("").as_bytes();
-
         let mut objects = b
-            .range_filter_skip(start_bytes, prefix_bytes, None)
+            .range_filter(marker.clone(), prefix.clone(), None)
             .map(|(key, obj)| s3s::dto::Object {
                 key: Some(key),
                 e_tag: Some(obj.format_e_tag()),
@@ -486,6 +477,12 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
+    /// <p>StartAfter is where you want Amazon S3 to start listing from. Amazon S3 starts listing after this
+    /// specified key. StartAfter can be any key in the bucket.</p>
+    ///
+    /// <code>ContinuationToken</code> indicates to Amazon S3 that the list is being continued on
+    /// this bucket with a token. <code>ContinuationToken</code> is obfuscated and is not a real
+    /// key. You can use this <code>ContinuationToken</code> for pagination of the list results.  </p>
     async fn list_objects_v2(
         &self,
         req: S3Request<ListObjectsV2Input>,
@@ -504,26 +501,19 @@ impl S3 for S3FS {
 
         let b = try_!(self.casfs.get_bucket(&bucket));
 
-        // max number of keys to return
+        // max number of keys to return, default is MAX_KEYS(1000)
         let requested_keys = max_keys.unwrap_or(MAX_KEYS);
         let key_count = std::cmp::min(requested_keys, MAX_KEYS);
 
         // continuation token
-        let token = decode_continuation_token(continuation_token.as_deref())?;
-
-        let start_bytes = if let Some(ref token) = token {
-            token.as_bytes()
-        } else if let Some(ref prefix) = prefix {
-            prefix.as_bytes()
-        } else if let Some(ref start_after) = start_after {
-            start_after.as_bytes()
-        } else {
-            &[]
-        };
-        let prefix_bytes = prefix.as_deref().unwrap_or("").as_bytes();
+        let decoded_continuation_token = decode_continuation_token(continuation_token.as_deref())?;
 
         let mut objects: Vec<_> = b
-            .range_filter_skip(start_bytes, prefix_bytes, start_after.clone())
+            .range_filter(
+                start_after.clone(),
+                prefix.clone(),
+                decoded_continuation_token,
+            )
             .map(|(key, obj)| s3s::dto::Object {
                 key: Some(key),
                 e_tag: Some(obj.format_e_tag()),

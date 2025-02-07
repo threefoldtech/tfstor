@@ -100,11 +100,11 @@ pub trait MetaTreeExt: BaseMetaTree {
     // TODO : make it paginated
     fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send>;
 
-    fn range_filter_skip<'a>(
+    fn range_filter<'a>(
         &'a self,
-        start_bytes: &'a [u8],
-        prefix_bytes: &'a [u8],
         start_after: Option<String>,
+        prefix: Option<String>,
+        continuation_token: Option<String>,
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)>;
 }
 
