@@ -409,14 +409,6 @@ impl MetaTreeExt for FjallTree {
             (Some(token), None) => Some(token),
             (None, start) => start,
         };
-        if ctsa.is_some() && prefix.is_some() {
-            eprintln!(
-                "ctsa: {:?}, prefix: {:?}, ctsa > prefix:{}",
-                ctsa.clone(),
-                prefix.clone(),
-                ctsa > prefix,
-            );
-        }
 
         let read_tx = self.keyspace.read_tx();
 

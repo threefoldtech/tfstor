@@ -283,6 +283,126 @@ async fn test_list_objects_v2() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_list_objects_v2_startafter() -> Result<()> {
+    //env_logger::init_from_env(
+    //    env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "error"),
+    //);
+
+    log::error!("Starting test_list_objects_v2_startafter");
+
+    let c = Client::new(config());
+    let bucket = format!("test-list-{}", Uuid::new_v4());
+    let bucket_str = bucket.as_str();
+    create_bucket(&c, bucket_str).await?;
+
+    let test_prefix = "this/is/a/test/";
+    let content = "hello world\n";
+    let keys: Vec<String> = (1..=1100)
+        .map(|i| format!("this/is/a/test/path/file{:04}.txt", i))
+        .collect();
+    {
+        // create 1100 objects
+        for key in keys {
+            //log::error!("Creating object: bucket:{} key:{}", bucket_str, key);
+            c.put_object()
+                .bucket(bucket_str)
+                .key(key)
+                .body(ByteStream::from_static(content.as_bytes()))
+                //.checksum_crc32_c(crc32c.as_str())
+                .send()
+                .await?;
+        }
+    }
+
+    {
+        // ------- without start_after & token
+        let result = c
+            .list_objects_v2()
+            .bucket(bucket_str)
+            .prefix(test_prefix)
+            .send()
+            .await;
+
+        let response = log_and_unwrap!(result);
+
+        let contents: Vec<_> = response
+            .contents()
+            .iter()
+            .filter_map(|obj| obj.key())
+            .collect();
+        assert_eq!(contents.len(), 1000);
+        assert_eq!(
+            "this/is/a/test/path/file0001.txt",
+            *contents.first().unwrap()
+        );
+        assert_eq!(
+            "this/is/a/test/path/file1000.txt",
+            *contents.last().unwrap()
+        );
+
+        assert!(response.next_continuation_token().is_some());
+
+        {
+            // ------ next page using token
+
+            let token = response.next_continuation_token().unwrap();
+            let result = c
+                .list_objects_v2()
+                .bucket(bucket_str)
+                .prefix(test_prefix)
+                .continuation_token(token)
+                .send()
+                .await;
+
+            let response = log_and_unwrap!(result);
+            let contents: Vec<_> = response
+                .contents()
+                .iter()
+                .filter_map(|obj| obj.key())
+                .collect();
+            assert_eq!(contents.len(), 100);
+
+            assert_eq!(response.continuation_token().unwrap(), token);
+            assert!(response.next_continuation_token().is_none());
+            assert!(response.start_after().is_none());
+            assert_eq!(
+                "this/is/a/test/path/file1001.txt",
+                *contents.first().unwrap()
+            );
+        }
+
+        {
+            // next page using start_after should give the same result
+            let result = c
+                .list_objects_v2()
+                .bucket(bucket_str)
+                .prefix(test_prefix)
+                .start_after("this/is/a/test/path/file1000.txt")
+                .send()
+                .await;
+
+            let response = log_and_unwrap!(result);
+            let contents: Vec<_> = response
+                .contents()
+                .iter()
+                .filter_map(|obj| obj.key())
+                .collect();
+            assert_eq!(contents.len(), 100);
+
+            assert!(response.next_continuation_token().is_none());
+            assert!(response.continuation_token().is_none());
+            assert!(response.start_after().is_some());
+            assert_eq!(
+                "this/is/a/test/path/file1001.txt",
+                *contents.first().unwrap()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 #[tracing::instrument]
 async fn test_multipart() -> Result<()> {
     let _guard = serial().await;

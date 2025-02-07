@@ -508,7 +508,7 @@ impl S3 for S3FS {
         // continuation token
         let decoded_continuation_token = decode_continuation_token(continuation_token.as_deref())?;
 
-        let mut objects: Vec<_> = b
+        let objects: Vec<_> = b
             .range_filter(
                 start_after.clone(),
                 prefix.clone(),
@@ -523,13 +523,19 @@ impl S3 for S3FS {
                 storage_class: None,
                 ..Default::default()
             })
-            .take((key_count + 1) as usize)
+            .take(key_count as usize)
             .collect();
 
         let mut next_token = None;
-        let truncated = objects.len() == key_count as usize + 1;
-        if truncated {
-            next_token = Some(hex_string(objects.pop().unwrap().key.unwrap().as_bytes()))
+        let has_next = objects.len() == key_count as usize;
+        if has_next {
+            next_token = Some(hex_string(
+                objects[(key_count - 1) as usize]
+                    .key
+                    .as_ref()
+                    .unwrap()
+                    .as_bytes(),
+            ))
         }
 
         let output = ListObjectsV2Output {
