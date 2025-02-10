@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::convert::TryFrom;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -314,10 +313,6 @@ impl FjallTree {
 }
 
 impl BaseMetaTree for FjallTree {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
         match self.partition.insert(key, value) {
             Ok(_) => Ok(()),

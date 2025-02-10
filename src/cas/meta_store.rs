@@ -1,5 +1,3 @@
-use std::any::Any;
-
 use super::{
     block::{Block, BlockID},
     bucket_meta::BucketMeta,
@@ -78,8 +76,6 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
 }
 
 pub trait BaseMetaTree: Send + Sync {
-    fn as_any(&self) -> &dyn Any;
-
     /// insert inserts a key value pair into the tree.
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError>;
 
@@ -109,55 +105,3 @@ pub trait MetaTreeExt: BaseMetaTree {
 }
 
 pub trait MetaTree: BaseMetaTree + MetaTreeExt {}
-
-impl<T: ?Sized + BaseMetaTree> BaseMetaTree for Box<T> {
-    fn as_any(&self) -> &dyn Any {
-        (**self).as_any()
-    }
-
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
-        (**self).insert(key, value)
-    }
-
-    fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
-        (**self).remove(key)
-    }
-
-    fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError> {
-        (**self).contains_key(key)
-    }
-
-    fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError> {
-        (**self).get_block_obj(key)
-    }
-
-    fn get_multipart_part_obj(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
-        (**self).get_multipart_part_obj(key)
-    }
-}
-
-use std::sync::Arc;
-impl<T: ?Sized + BaseMetaTree> BaseMetaTree for Arc<T> {
-    fn as_any(&self) -> &dyn Any {
-        (**self).as_any()
-    }
-
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
-        (**self).insert(key, value)
-    }
-
-    fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
-        (**self).remove(key)
-    }
-
-    fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError> {
-        (**self).contains_key(key)
-    }
-
-    fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError> {
-        (**self).get_block_obj(key)
-    }
-    fn get_multipart_part_obj(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
-        (**self).get_multipart_part_obj(key)
-    }
-}
