@@ -142,8 +142,8 @@ impl CasFS {
     }
 
     // create and insert a new  bucket
-    pub fn create_bucket(&self, bucket_name: String) -> Result<(), MetaError> {
-        let bm = BucketMeta::new(bucket_name.clone());
+    pub fn create_bucket(&self, bucket_name: &str) -> Result<(), MetaError> {
+        let bm = BucketMeta::new(bucket_name.to_string());
         self.meta_store.insert_bucket(bucket_name, bm.to_vec())
     }
 
@@ -389,7 +389,7 @@ mod tests {
         let bucket_name = "test_bucket";
         let key1 = "test_key1";
         let key2 = "test_key2";
-        fs.create_bucket(bucket_name.to_string()).unwrap();
+        fs.create_bucket(bucket_name).unwrap();
 
         // Create ByteStream from test data
         let test_data = b"long test data".repeat(100).to_vec();
@@ -449,7 +449,7 @@ mod tests {
         let bucket_name = "test_bucket";
         let key1 = "test_key1";
         let key2 = "test_key2";
-        fs.create_bucket(bucket_name.to_string()).unwrap();
+        fs.create_bucket(bucket_name).unwrap();
 
         // Create ByteStream from test data
         let test_data = b"long test data".repeat(100).to_vec();
@@ -519,7 +519,7 @@ mod tests {
         let key = "test/key";
 
         // Create bucket
-        fs.create_bucket(bucket_name.to_string()).unwrap();
+        fs.create_bucket(bucket_name).unwrap();
 
         // Create test data and stream
         let test_data = b"test data".to_vec();
@@ -584,7 +584,7 @@ mod tests {
         let key2 = "test/key2";
 
         // Create bucket
-        fs.create_bucket(bucket.to_string()).unwrap();
+        fs.create_bucket(bucket).unwrap();
 
         // Create test data
         let test_data = b"test data".to_vec();
@@ -659,7 +659,7 @@ mod tests {
         let key1 = "test/key1";
 
         // Create bucket
-        fs.create_bucket(bucket.to_string()).unwrap();
+        fs.create_bucket(bucket).unwrap();
 
         // Create test data
         let test_data = b"test data".to_vec();

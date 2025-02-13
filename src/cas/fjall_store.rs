@@ -137,13 +137,13 @@ impl MetaStore for FjallStore {
         }
     }
 
-    fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
+    fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
         let mut tx = self.keyspace.write_tx();
-        tx.insert(&self.bucket_partition, &bucket_name, raw_bucket);
+        tx.insert(&self.bucket_partition, bucket_name, raw_bucket);
 
         self.commit_persist(tx)?;
 
-        match self.get_partition(&bucket_name) {
+        match self.get_partition(bucket_name) {
             // get partition to create it
             Ok(_) => Ok(()),
             Err(e) => Err(e),
@@ -486,11 +486,11 @@ mod tests {
         let bucket_name2 = "test-bucket2";
         let bucket_meta = BucketMeta::new(bucket_name1.to_string());
         store
-            .insert_bucket(bucket_name1.to_string(), bucket_meta.to_vec())
+            .insert_bucket(bucket_name1, bucket_meta.to_vec())
             .unwrap();
         store
             .insert_bucket(
-                bucket_name2.to_string(),
+                bucket_name2,
                 BucketMeta::new(bucket_name2.to_string()).to_vec(),
             )
             .unwrap();
@@ -515,7 +515,7 @@ mod tests {
         // Setup bucket first
         let bucket_meta = BucketMeta::new(bucket_name.to_string());
         store
-            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
 
         let bucket = store.get_bucket_tree(bucket_name).unwrap();
@@ -549,7 +549,7 @@ mod tests {
         let bucket_name = "test-bucket";
         let bucket_meta = BucketMeta::new(bucket_name.to_string());
         store
-            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
         let bucket = store.get_bucket_tree(bucket_name).unwrap();
         assert!(bucket.get_meta("nonexistent").is_err());
@@ -563,7 +563,7 @@ mod tests {
         // Setup bucket
         let bucket_meta = BucketMeta::new(bucket_name.to_string());
         store
-            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
 
         let bucket = store.get_bucket_tree(bucket_name).unwrap();
@@ -598,7 +598,7 @@ mod tests {
         let empty_bucket = "empty-bucket";
         store
             .insert_bucket(
-                empty_bucket.to_string(),
+                empty_bucket,
                 BucketMeta::new(empty_bucket.to_string()).to_vec(),
             )
             .unwrap();
@@ -614,7 +614,7 @@ mod tests {
         // Setup bucket
         let bucket_meta = BucketMeta::new(bucket_name.to_string());
         store
-            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
+            .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
 
         let bucket = store.get_bucket_tree(bucket_name).unwrap();

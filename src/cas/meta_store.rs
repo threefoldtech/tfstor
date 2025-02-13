@@ -43,7 +43,7 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     fn drop_bucket(&self, name: &str) -> Result<(), MetaError>;
 
     /// insert_bucket inserts raw representation of the bucket into the meta store.
-    fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError>;
+    fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError>;
 
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.

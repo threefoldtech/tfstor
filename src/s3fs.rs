@@ -186,7 +186,7 @@ impl S3 for S3FS {
             ));
         }
 
-        try_!(self.casfs.create_bucket(input.bucket.clone()));
+        try_!(self.casfs.create_bucket(&input.bucket));
 
         self.metrics.inc_bucket_count();
 
