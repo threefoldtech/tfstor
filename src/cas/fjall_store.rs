@@ -9,7 +9,7 @@ use super::{
     block::{Block, BlockID, BLOCKID_SIZE},
     bucket_meta::BucketMeta,
     meta_errors::MetaError,
-    meta_store::{BaseMetaTree, MetaStore, MetaTree, MetaTreeExt},
+    meta_store::{BaseMetaTree, BlockTree, BucketTree, BucketTreeExt, MetaStore, MultiPartTree},
     multipart::MultiPart,
     object::Object,
 };
@@ -79,7 +79,10 @@ impl FjallStore {
 }
 
 impl MetaStore for FjallStore {
-    fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError> {
+    fn get_bucket_ext(
+        &self,
+        name: &str,
+    ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
         let bucket = self.get_partition(name)?;
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
@@ -87,14 +90,14 @@ impl MetaStore for FjallStore {
         )))
     }
 
-    fn get_allbuckets_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    fn get_allbuckets_tree(&self) -> Result<Box<dyn BucketTree>, MetaError> {
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
             self.bucket_partition.clone(),
         )))
     }
 
-    fn get_block_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    fn get_block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError> {
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
             self.block_partition.clone(),
@@ -108,7 +111,7 @@ impl MetaStore for FjallStore {
         )))
     }
 
-    fn get_multipart_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    fn get_multipart_tree(&self) -> Result<Box<dyn MultiPartTree>, MetaError> {
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
             self.multipart_partition.clone(),
@@ -333,8 +336,10 @@ impl BaseMetaTree for FjallTree {
             Err(_) => Err(MetaError::KeyNotFound),
         }
     }
+}
 
-    fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError> {
+impl BlockTree for FjallTree {
+    fn get_block(&self, key: &[u8]) -> Result<Block, MetaError> {
         let block_data = self.get(key)?;
 
         let block = match Block::try_from(&*block_data) {
@@ -343,8 +348,10 @@ impl BaseMetaTree for FjallTree {
         };
         Ok(block)
     }
+}
 
-    fn get_multipart_part_obj(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
+impl MultiPartTree for FjallTree {
+    fn get_multipart_part(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
         let part_data = self.get(key)?;
         // unwrap here is safe as it is a coding error
         let mp = MultiPart::try_from(&*part_data).expect("Corrupted multipart data");
@@ -352,7 +359,7 @@ impl BaseMetaTree for FjallTree {
     }
 }
 
-impl MetaTreeExt for FjallTree {
+impl BucketTreeExt for FjallTree {
     fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send> {
         let partition = self.partition.clone();
         let keyspace = self.keyspace.clone();
@@ -446,8 +453,6 @@ impl MetaTreeExt for FjallTree {
         }))
     }
 }
-
-impl MetaTree for FjallTree {} // Empty impl as marker
 
 #[cfg(test)]
 mod tests {

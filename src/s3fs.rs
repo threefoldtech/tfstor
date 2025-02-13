@@ -108,7 +108,7 @@ impl S3 for S3FS {
             }
             let part_key = format!("{}-{}-{}-{}", &bucket, &key, &upload_id, part_number);
 
-            let mp = match multipart_map.get_multipart_part_obj(part_key.as_bytes()) {
+            let mp = match multipart_map.get_multipart_part(part_key.as_bytes()) {
                 Ok(mp) => mp,
                 Err(e) => {
                     error!("Missing part \"{}\" in multipart upload: {}", part_key, e);
@@ -124,9 +124,7 @@ impl S3 for S3FS {
         let mut size = 0;
         let block_map = try_!(self.casfs.block_tree());
         for block in &blocks {
-            let block_info = block_map
-                .get_block_obj(block)
-                .expect("Block data is corrupt");
+            let block_info = block_map.get_block(block).expect("Block data is corrupt");
             size += block_info.size();
             hasher.update(block);
         }
@@ -342,7 +340,7 @@ impl S3 for S3FS {
         for block in obj_meta.blocks() {
             // unwrap here is safe as we only add blocks to the list of an object if they are
             // corectly inserted in the block map
-            let block_meta = try_!(block_map.get_block_obj(block));
+            let block_meta = try_!(block_map.get_block(block));
             block_size += block_meta.size();
             paths.push((block_meta.disk_path(self.root.clone()), block_meta.size()));
         }

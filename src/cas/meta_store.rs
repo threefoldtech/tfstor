@@ -17,21 +17,22 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// returns tree which contains all the buckets.
     /// This tree is used to store the bucket lists and provide
     /// the CRUD for the bucket list.
-    fn get_allbuckets_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+    fn get_allbuckets_tree(&self) -> Result<Box<dyn BucketTree>, MetaError>;
 
     /// get_bucket_ext returns the tree for specific bucket with the extended methods.
-    fn get_bucket_ext(&self, name: &str) -> Result<Box<dyn MetaTree + Send + Sync>, MetaError>;
+    fn get_bucket_ext(&self, name: &str)
+        -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError>;
 
     /// get_block_tree returns the block meta tree.
     /// This tree is used to store the data block metadata.
-    fn get_block_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+    fn get_block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError>;
 
     /// get_path_tree returns the path meta tree
     /// This tree is used to store the file path metadata.
     fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
     /// get_multipart_tree returns the multipart meta tree
-    fn get_multipart_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+    fn get_multipart_tree(&self) -> Result<Box<dyn MultiPartTree>, MetaError>;
 
     /// bucket_exists returns true if the bucket exists.
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError>;
@@ -83,15 +84,23 @@ pub trait BaseMetaTree: Send + Sync {
     fn remove(&self, key: &[u8]) -> Result<(), MetaError>;
 
     fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError>;
-
-    /// get_block_obj returns the `Object` for the given key.
-    fn get_block_obj(&self, key: &[u8]) -> Result<Block, MetaError>;
-
-    /// get_multipart_part_obj returns the `MultiPart` for the given key.
-    fn get_multipart_part_obj(&self, key: &[u8]) -> Result<MultiPart, MetaError>;
 }
 
-pub trait MetaTreeExt: BaseMetaTree {
+pub trait BucketTree: BaseMetaTree {}
+
+impl<T: BaseMetaTree> BucketTree for T {}
+
+pub trait BlockTree: Send + Sync {
+    /// get_block_obj returns the `Object` for the given key.
+    fn get_block(&self, key: &[u8]) -> Result<Block, MetaError>;
+}
+
+pub trait MultiPartTree: BaseMetaTree {
+    /// get_multipart_part_obj returns the `MultiPart` for the given key.
+    fn get_multipart_part(&self, key: &[u8]) -> Result<MultiPart, MetaError>;
+}
+
+pub trait BucketTreeExt: BaseMetaTree {
     // get all keys of the bucket
     // TODO : make it paginated
     fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send>;
@@ -104,4 +113,4 @@ pub trait MetaTreeExt: BaseMetaTree {
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)>;
 }
 
-pub trait MetaTree: BaseMetaTree + MetaTreeExt {}
+//pub trait BucketTreeExt: BaseMetaTree + MetaTreeExt {}
