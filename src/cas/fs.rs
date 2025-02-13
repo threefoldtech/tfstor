@@ -130,14 +130,15 @@ impl CasFS {
         blocks: Vec<BlockID>,
     ) -> Result<Object, MetaError> {
         let obj_meta = Object::new(size, e_tag, parts, blocks);
-        self.meta_store
-            .insert_meta_obj(bucket_name, key, obj_meta.to_vec())?;
+        let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
+        bucket.insert_meta(key, obj_meta.to_vec())?;
         Ok(obj_meta)
     }
 
     // get meta object from the DB
-    pub fn get_object_meta(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
-        self.meta_store.get_meta_obj(bucket, key)
+    pub fn get_object_meta(&self, bucket_name: &str, key: &str) -> Result<Object, MetaError> {
+        let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
+        bucket.get_meta(key)
     }
 
     // create and insert a new  bucket
@@ -234,7 +235,7 @@ impl CasFS {
         key: &str,
         data: ByteStream,
     ) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
-        let old_obj_meta = match self.meta_store.get_meta_obj(bucket_name, key) {
+        let old_obj_meta = match self.get_object_meta(bucket_name, key) {
             Ok(obj_meta) => Some(obj_meta),
             Err(_) => None,
         };

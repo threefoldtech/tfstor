@@ -17,7 +17,9 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// returns tree which contains all the buckets.
     /// This tree is used to store the bucket lists and provide
     /// the CRUD for the bucket list.
-    fn get_allbuckets_tree(&self) -> Result<Box<dyn BucketTree>, MetaError>;
+    fn get_allbuckets_tree(&self) -> Result<Box<dyn AllBucketsTree>, MetaError>;
+
+    fn get_bucket_tree(&self, bucket_name: &str) -> Result<Box<dyn BucketTree>, MetaError>;
 
     /// get_bucket_ext returns the tree for specific bucket with the extended methods.
     fn get_bucket_ext(&self, name: &str)
@@ -42,20 +44,6 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
 
     /// insert_bucket inserts raw representation of the bucket into the meta store.
     fn insert_bucket(&self, bucket_name: String, raw_bucket: Vec<u8>) -> Result<(), MetaError>;
-
-    /// insert_meta_obj inserts a metadata Object into the meta store.
-    fn insert_meta_obj(
-        &self,
-        bucket_name: &str,
-        key: &str,
-        raw_obj: Vec<u8>,
-    ) -> Result<(), MetaError>;
-
-    /// get_meta_obj returns the Object metadata for the given bucket and key.
-    /// We return the Object struct instead of the raw bytes for performance reason.
-    ///
-    /// TODO: we should return the raw bytes and let the caller to deserialize it.
-    fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError>;
 
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.
@@ -86,9 +74,18 @@ pub trait BaseMetaTree: Send + Sync {
     fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError>;
 }
 
-pub trait BucketTree: BaseMetaTree {}
+pub trait AllBucketsTree: BaseMetaTree {}
 
-impl<T: BaseMetaTree> BucketTree for T {}
+impl<T: BaseMetaTree> AllBucketsTree for T {}
+
+pub trait BucketTree: BaseMetaTree {
+    /// insert_meta inserts a metadata Object into the bucket
+    fn insert_meta(&self, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError>;
+
+    /// get_meta returns the Object metadata for the given bucket and key.
+    /// We return the Object struct instead of the raw bytes for performance reason.
+    fn get_meta(&self, key: &str) -> Result<Object, MetaError>;
+}
 
 pub trait BlockTree: Send + Sync {
     /// get_block_obj returns the `Object` for the given key.

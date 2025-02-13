@@ -9,7 +9,10 @@ use super::{
     block::{Block, BlockID, BLOCKID_SIZE},
     bucket_meta::BucketMeta,
     meta_errors::MetaError,
-    meta_store::{BaseMetaTree, BlockTree, BucketTree, BucketTreeExt, MetaStore, MultiPartTree},
+    meta_store::{
+        AllBucketsTree, BaseMetaTree, BlockTree, BucketTree, BucketTreeExt, MetaStore,
+        MultiPartTree,
+    },
     multipart::MultiPart,
     object::Object,
 };
@@ -90,10 +93,18 @@ impl MetaStore for FjallStore {
         )))
     }
 
-    fn get_allbuckets_tree(&self) -> Result<Box<dyn BucketTree>, MetaError> {
+    fn get_allbuckets_tree(&self) -> Result<Box<dyn AllBucketsTree>, MetaError> {
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
             self.bucket_partition.clone(),
+        )))
+    }
+
+    fn get_bucket_tree(&self, bucket_name: &str) -> Result<Box<dyn BucketTree>, MetaError> {
+        let bucket = self.get_partition(bucket_name)?;
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            Arc::new(bucket),
         )))
     }
 
@@ -142,31 +153,6 @@ impl MetaStore for FjallStore {
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
         let exists = self.keyspace.partition_exists(bucket_name);
         Ok(exists)
-    }
-
-    fn insert_meta_obj(
-        &self,
-        bucket_name: &str,
-        key: &str,
-        raw_obj: Vec<u8>,
-    ) -> Result<(), MetaError> {
-        let bucket = self.get_partition(bucket_name)?;
-        let mut tx = self.keyspace.write_tx();
-        tx.insert(&bucket, key, raw_obj);
-        self.commit_persist(tx)?;
-        Ok(())
-    }
-
-    fn get_meta_obj(&self, bucket: &str, key: &str) -> Result<Object, MetaError> {
-        let bucket = self.get_partition(bucket)?;
-        let read_tx = self.keyspace.read_tx();
-        let raw_object = match read_tx.get(&bucket, key) {
-            Ok(Some(o)) => o,
-            Ok(None) => return Err(MetaError::KeyNotFound),
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-
-        Ok(Object::try_from(&*raw_object).expect("Malformed object"))
     }
 
     /// Get a list of all buckets in the system.
@@ -338,6 +324,32 @@ impl BaseMetaTree for FjallTree {
     }
 }
 
+impl BucketTree for FjallTree {
+    fn insert_meta(&self, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
+        let mut tx = self.keyspace.write_tx();
+        tx.insert(&self.partition, key, raw_obj);
+        tx.commit()
+            .map_err(|e| MetaError::TransactionError(e.to_string()))?;
+
+        self.keyspace
+            .persist(fjall::PersistMode::SyncAll)
+            .map_err(|e| MetaError::PersistError(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn get_meta(&self, key: &str) -> Result<Object, MetaError> {
+        let read_tx = self.keyspace.read_tx();
+        let raw_object = match read_tx.get(&self.partition, key) {
+            Ok(Some(o)) => o,
+            Ok(None) => return Err(MetaError::KeyNotFound),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
+        };
+
+        Ok(Object::try_from(&*raw_object).expect("Malformed object"))
+    }
+}
+
 impl BlockTree for FjallTree {
     fn get_block(&self, key: &[u8]) -> Result<Block, MetaError> {
         let block_data = self.get(key)?;
@@ -506,6 +518,8 @@ mod tests {
             .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
             .unwrap();
 
+        let bucket = store.get_bucket_tree(bucket_name).unwrap();
+
         // Test object insertion
         let test_obj = Object::new(
             1024,                   // 1KB object
@@ -513,18 +527,15 @@ mod tests {
             0,
             vec![BlockID::from([1; 16])], // Sample block ID
         );
-        store
-            .insert_meta_obj(bucket_name, key, test_obj.to_vec())
-            .unwrap();
+        bucket.insert_meta(key, test_obj.to_vec()).unwrap();
 
         // Test object retrieval
-        let retrieved_obj = store.get_meta_obj(bucket_name, key).unwrap();
+        let retrieved_obj = bucket.get_meta(key).unwrap();
         assert_eq!(retrieved_obj.blocks().len(), 1);
         assert_eq!(retrieved_obj.blocks()[0], BlockID::from([1; 16]));
 
         // Test error cases of object retrieval
-        assert!(store.get_meta_obj("nonexistent-bucket", key).is_err());
-        assert!(store.get_meta_obj(bucket_name, "nonexistent-key").is_err());
+        assert!(bucket.get_meta("nonexistent-key").is_err());
     }
 
     #[test]
@@ -532,15 +543,16 @@ mod tests {
         let (store, _dir) = setup_store();
 
         // Test nonexistent bucket
-        assert!(store.get_meta_obj("nonexistent", "key").is_err());
+        assert_eq!(store.bucket_exists("nonexistent").unwrap(), false);
 
         // Test nonexistent object
-        let bucket = "test-bucket";
-        let bucket_meta = BucketMeta::new(bucket.to_string());
+        let bucket_name = "test-bucket";
+        let bucket_meta = BucketMeta::new(bucket_name.to_string());
         store
-            .insert_bucket(bucket.to_string(), bucket_meta.to_vec())
+            .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
             .unwrap();
-        assert!(store.get_meta_obj(bucket, "nonexistent").is_err());
+        let bucket = store.get_bucket_tree(bucket_name).unwrap();
+        assert!(bucket.get_meta("nonexistent").is_err());
     }
 
     #[test]
@@ -554,6 +566,8 @@ mod tests {
             .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
             .unwrap();
 
+        let bucket = store.get_bucket_tree(bucket_name).unwrap();
+
         // Insert test objects
         let test_keys = vec!["a", "b", "c"];
         for key in &test_keys {
@@ -563,9 +577,7 @@ mod tests {
                 0,
                 vec![BlockID::from([1; 16])],
             );
-            store
-                .insert_meta_obj(bucket_name, key, obj.to_vec())
-                .unwrap();
+            bucket.insert_meta(key, obj.to_vec()).unwrap();
         }
 
         let bucket = store.get_bucket_ext(bucket_name).unwrap();
@@ -605,6 +617,8 @@ mod tests {
             .insert_bucket(bucket_name.to_string(), bucket_meta.to_vec())
             .unwrap();
 
+        let bucket = store.get_bucket_tree(bucket_name).unwrap();
+
         // Insert test objects with unordered keys
         let test_data = vec![
             ("c/1", "data5"),
@@ -621,9 +635,7 @@ mod tests {
                 0,
                 vec![BlockID::from([1; 16])],
             );
-            store
-                .insert_meta_obj(bucket_name, key, obj.to_vec())
-                .unwrap();
+            bucket.insert_meta(key, obj.to_vec()).unwrap();
         }
 
         let bucket = store.get_bucket_ext(bucket_name).unwrap();
