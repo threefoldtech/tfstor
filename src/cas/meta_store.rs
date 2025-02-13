@@ -49,14 +49,34 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// TODO: this should be paginated and return a stream.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
 
-    /// delete all objects in a bucket for the given key.
-    /// it returns a list of blocks that were deleted.
-    fn delete_objects(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError>;
+    /// delete object in a bucket for the given key.
+    ///
+    /// It should do at least the following:
+    /// - get all the blocks from the object
+    /// - decrements the refcount of all blocks, then removes blocks which are no longer referenced.
+    /// - and return the deleted blocks, so that the caller can remove the blocks from the storage.
+    ///
+    /// TODO: all the above steps shouldn't be done in the meta storage layer.
+    ///       we do it there because we still couldn't abstract the DB transaction.
+    fn delete_object(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError>;
 
-    // Check if the hash is present in the block map. If it is not, try to find a path, and
-    // insert it.
-    // it returns true if the block was not exists
-    fn write_block_and_path_meta(
+    // Write a block to the block map.
+    //
+    // block_hash is hash of the block, which become the key in the block map.
+    // data_len is the length of the block data.
+    // key_has_block is true if the coresponding key already has the block
+    //
+    // It should do at least the following:
+    // - Check if the hash is present in the block map
+    //    - if exists and key_has_block is false: increment the refcount
+    //   - if exists and key_has_block is true: do nothing
+    //    - if not exists:
+    //          - find the path for it
+    //          - insert the block into the block map
+    //
+    // TODO: all the above steps shouldn't be done in the meta storage layer.
+    //       we do it there because we still couldn't abstract the DB transaction.
+    fn write_block(
         &self,
         block_hash: BlockID,
         data_len: usize,

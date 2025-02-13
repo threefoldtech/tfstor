@@ -173,12 +173,9 @@ impl MetaStore for FjallStore {
         Ok(buckets)
     }
 
-    fn delete_objects(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError> {
-        // Remove an object. This fetches the object, decrements the refcount of all blocks,
-        // and removes blocks which are no longer referenced.
+    fn delete_object(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError> {
         let bucket = self.get_partition(bucket)?;
 
-        // transaction
         let raw_object = match bucket.get(key) {
             Ok(Some(o)) => o,
             Ok(None) => return Ok(vec![]),
@@ -219,7 +216,7 @@ impl MetaStore for FjallStore {
         Ok(to_delete)
     }
 
-    fn write_block_and_path_meta(
+    fn write_block(
         &self,
         block_hash: BlockID,
         data_len: usize,

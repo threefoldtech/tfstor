@@ -184,9 +184,12 @@ impl CasFS {
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), MetaError> {
         let path_map = self.path_tree()?;
 
-        let blocks_to_delete = self.meta_store.delete_objects(bucket, key)?;
+        // get blocks that safe to delete
+        let blocks_to_delete = self.meta_store.delete_object(bucket, key)?;
 
-        // Now delete all the blocks from disk, and unlink them in the path map.
+        // Now
+        // - delete all the blocks from disk
+        // - and unlink them in the path map.
         for block in blocks_to_delete {
             async_fs::remove_file(block.disk_path(self.root.clone()))
                 .await
@@ -279,15 +282,17 @@ impl CasFS {
                 hasher.update(&bytes);
                 let block_hash: BlockID = hasher.finalize().into();
                 let data_len = bytes.len();
+
+                // check if this key already has this block
                 let key_has_block = if let Some(obj) = old_obj_meta.as_ref() {
                     obj.has_block(&block_hash)
                 } else {
                     false
                 };
 
-                let should_write =
-                    self.meta_store
-                        .write_block_and_path_meta(block_hash, data_len, key_has_block);
+                let should_write = self
+                    .meta_store
+                    .write_block(block_hash, data_len, key_has_block);
 
                 let mut pm = PendingMarker::new(self.metrics.clone());
                 match should_write {
