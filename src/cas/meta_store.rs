@@ -66,6 +66,10 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     // data_len is the length of the block data.
     // key_has_block is true if the coresponding key already has the block
     //
+    // It returns a tuple of bool and Block:
+    // - bool is true if the block is new, hence need to be written to the disk
+    // - Block is the block object
+    //
     // It should do at least the following:
     // - Check if the hash is present in the block map
     //    - if exists and key_has_block is false: increment the refcount
@@ -81,7 +85,7 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
         block_hash: BlockID,
         data_len: usize,
         key_has_block: bool,
-    ) -> Result<bool, MetaError>;
+    ) -> Result<(bool, Block), MetaError>;
 }
 
 pub trait BaseMetaTree: Send + Sync {

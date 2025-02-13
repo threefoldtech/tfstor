@@ -243,7 +243,6 @@ impl CasFS {
             Err(_) => None,
         };
         let old_obj_meta = Arc::new(old_obj_meta);
-        let block_map = Arc::new(self.meta_store.get_block_tree()?);
 
         let (tx, rx) = unbounded();
         let mut content_hash = Md5::new();
@@ -262,11 +261,11 @@ impl CasFS {
                 self.metrics.bytes_received(bytes.len());
             }
         })
-        .zip(stream::repeat((tx, block_map, old_obj_meta)))
+        .zip(stream::repeat((tx, old_obj_meta)))
         .enumerate()
         .for_each_concurrent(
             5,
-            |(idx, (maybe_chunk, (mut tx, block_map, old_obj_meta)))| async move {
+            |(idx, (maybe_chunk, (mut tx, old_obj_meta)))| async move {
                 if let Err(e) = maybe_chunk {
                     if let Err(e) = tx
                         .send(Err(std::io::Error::new(e.kind(), e.to_string())))
@@ -290,41 +289,33 @@ impl CasFS {
                     false
                 };
 
-                let should_write = self
-                    .meta_store
-                    .write_block(block_hash, data_len, key_has_block);
+                let write_meta_result =
+                    self.meta_store
+                        .write_block(block_hash, data_len, key_has_block);
 
                 let mut pm = PendingMarker::new(self.metrics.clone());
-                match should_write {
+
+                let block = match write_meta_result {
                     Err(e) => {
                         if let Err(e) = tx.send(Err(e.into())).await {
                             error!("Could not send transaction error: {}", e);
                         }
                         return;
                     }
-                    Ok(false) => {
+                    Ok((false, _)) => {
                         pm.block_ignored();
                         if let Err(e) = tx.send(Ok((idx, block_hash))).await {
                             error!("Could not send block id: {}", e);
                         }
                         return;
                     }
-                    Ok(true) => pm.block_pending(),
-                };
-
-                // write the actual block
-                // first load the block again from the DB
-                let block = match block_map.get_block(&block_hash) {
-                    Ok(block) => block,
-                    Err(e) => {
-                        if let Err(e) = tx.send(Err(e.into())).await {
-                            pm.block_write_error();
-                            error!("Could not send db error: {}", e);
-                        }
-                        return;
+                    Ok((true, block)) => {
+                        pm.block_pending();
+                        block
                     }
                 };
 
+                // write the actual block to disk
                 let block_path = block.disk_path(self.root.clone());
                 if let Err(e) = async_fs::create_dir_all(block_path.parent().unwrap()).await {
                     if let Err(e) = tx.send(Err(e)).await {

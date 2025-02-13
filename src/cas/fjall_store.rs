@@ -221,29 +221,28 @@ impl MetaStore for FjallStore {
         block_hash: BlockID,
         data_len: usize,
         key_has_block: bool,
-    ) -> Result<bool, MetaError> {
+    ) -> Result<(bool, Block), MetaError> {
         let blocks = self.block_partition.clone();
         let paths = self.path_partition.clone();
 
         let mut tx = self.keyspace.write_tx();
-        let should_write = match tx.get(&blocks, block_hash) {
+        let res = match tx.get(&blocks, block_hash) {
             Ok(Some(block_data)) => {
                 // Block already exists
+
+                let mut block =
+                    Block::try_from(&*block_data).expect("Only valid blocks are stored");
 
                 // if the key already has this block, the block doesn't got more references
                 // and we don't need to write it back.
                 if !key_has_block {
                     // bump refcount on the block
-                    let mut block =
-                        Block::try_from(&*block_data).expect("Only valid blocks are stored");
-
                     block.increment_refcount();
                     // write block back
                     // TODO: this could be done in an `update_and_fetch`
                     tx.insert(&blocks, block_hash, block.to_vec());
                 }
-
-                Ok(false)
+                Ok((false, block))
             }
             Ok(None) => {
                 let mut idx = 0;
@@ -267,12 +266,12 @@ impl MetaStore for FjallStore {
                 let block = Block::new(data_len, block_hash[..idx].to_vec());
 
                 tx.insert(&blocks, block_hash, block.to_vec());
-                Ok(true)
+                Ok((true, block))
             }
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         };
         self.commit_persist(tx)?;
-        should_write
+        res
     }
 }
 
