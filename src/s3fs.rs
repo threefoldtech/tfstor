@@ -28,9 +28,7 @@ use s3s::S3Result;
 use s3s::S3;
 use s3s::{S3Request, S3Response};
 
-use crate::cas::{
-    block_stream::BlockStream, multipart::MultiPart, range_request::parse_range_request, CasFS,
-};
+use crate::cas::{block_stream::BlockStream, range_request::parse_range_request, CasFS};
 use crate::metrics::SharedMetrics;
 
 const MAX_KEYS: i32 = 1000;
@@ -106,7 +104,9 @@ impl S3 for S3FS {
                     "InvalidPartOrder"
                 )));
             }
-            let part_key = format!("{}-{}-{}-{}", &bucket, &key, &upload_id, part_number);
+            let part_key =
+                self.casfs
+                    .part_storage_key(&bucket, &key, &upload_id, part_number as i64);
 
             let mp = match multipart_map.get_multipart_part(part_key.as_bytes()) {
                 Ok(mp) => mp,
@@ -194,11 +194,17 @@ impl S3 for S3FS {
         Ok(S3Response::new(output))
     }
 
+    // create_multipart_upload doesn't do any bookkeeping, it just do some checking
+    // and returns an upload id
     async fn create_multipart_upload(
         &self,
         req: S3Request<CreateMultipartUploadInput>,
     ) -> S3Result<S3Response<CreateMultipartUploadOutput>> {
         let CreateMultipartUploadInput { bucket, key, .. } = req.input;
+
+        if !try_!(self.casfs.bucket_exists(&bucket)) {
+            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
+        }
 
         let upload_id = Uuid::new_v4().to_string();
 
@@ -635,23 +641,17 @@ impl S3 for S3FS {
             ));
         }
 
-        let mp_map = try_!(self.casfs.multipart_tree());
-
-        let e_tag = format!("\"{}\"", hex_string(&hash));
-        let storage_key = format!("{}-{}-{}-{}", &bucket, &key, &upload_id, part_number);
-        let mp = MultiPart::new(
-            size as usize,
-            part_number as i64,
+        try_!(self.casfs.insert_multipart_part(
             bucket,
             key,
+            size as usize,
+            part_number as i64,
             upload_id,
             hash,
-            blocks,
-        );
+            blocks
+        ));
 
-        let enc_mp = Vec::from(&mp);
-
-        try_!(mp_map.insert(storage_key.as_bytes(), enc_mp));
+        let e_tag = format!("\"{}\"", hex_string(&hash));
 
         let output = UploadPartOutput {
             e_tag: Some(e_tag),

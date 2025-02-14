@@ -3,7 +3,7 @@ use std::{io, mem, path::PathBuf};
 
 use super::{
     block::BlockID, bucket_meta::BucketMeta, buffered_byte_stream::BufferedByteStream, fjall_store,
-    meta_errors::MetaError, meta_store, object::Object,
+    meta_errors::MetaError, meta_store, multipart::MultiPart, object::Object,
 };
 use crate::metrics::SharedMetrics;
 
@@ -167,6 +167,37 @@ impl CasFS {
 
         // remove the bucket tree/partition itself
         self.meta_store.drop_bucket(bucket_name)?;
+        Ok(())
+    }
+
+    pub fn part_storage_key(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: i64,
+    ) -> String {
+        format!("{}-{}-{}-{}", bucket, key, upload_id, part_number)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_multipart_part(
+        &self,
+        bucket: String,
+        key: String,
+        size: usize,
+        part_number: i64,
+        upload_id: String,
+        hash: BlockID,
+        blocks: Vec<BlockID>,
+    ) -> Result<(), MetaError> {
+        let mp_map = self.multipart_tree()?;
+
+        let storage_key = self.part_storage_key(&bucket, &key, &upload_id, part_number);
+
+        let mp = MultiPart::new(size, part_number, bucket, key, upload_id, hash, blocks);
+
+        mp_map.insert(storage_key.as_bytes(), mp.to_vec())?;
         Ok(())
     }
 

@@ -40,6 +40,10 @@ impl MultiPart {
     pub fn blocks(&self) -> &[BlockID] {
         &self.blocks
     }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.into()
+    }
 }
 
 impl From<&MultiPart> for Vec<u8> {

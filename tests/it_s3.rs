@@ -453,6 +453,7 @@ async fn test_multipart() -> Result<()> {
             .await?;
         ans.upload_id.unwrap()
     };
+    assert_ne!(upload_id.len(), 0);
     let upload_id = upload_id.as_str();
 
     let upload_parts = {
