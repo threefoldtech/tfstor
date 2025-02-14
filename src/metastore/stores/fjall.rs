@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use fjall;
 
-use super::{
+use crate::metastore::{
     AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTree, BucketTreeExt,
     MetaError, MetaStore, Object, BLOCKID_SIZE,
 };
