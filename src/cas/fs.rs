@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::{io, mem, path::PathBuf};
+use std::{io, path::PathBuf};
 
 use super::{
     buffered_byte_stream::BufferedByteStream,
@@ -25,7 +25,6 @@ use rusoto_core::ByteStream;
 use tracing::error;
 
 pub const BLOCK_SIZE: usize = 1 << 20; // Supposedly 1 MiB
-pub const PTR_SIZE: usize = mem::size_of::<usize>(); // Size of a `usize` in bytes
 
 struct PendingMarker {
     metrics: SharedMetrics,

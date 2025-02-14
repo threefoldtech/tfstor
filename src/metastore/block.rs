@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::cas::{errors::FsError, fs::PTR_SIZE};
+use super::{FsError, PTR_SIZE};
 
 pub const BLOCKID_SIZE: usize = 16;
 

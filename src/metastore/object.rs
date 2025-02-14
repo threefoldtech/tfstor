@@ -7,9 +7,7 @@ use std::{
 use chrono::{SecondsFormat, TimeZone, Utc};
 use faster_hex::hex_string;
 
-use super::{BlockID, BLOCKID_SIZE};
-
-use crate::cas::{errors::FsError, fs::PTR_SIZE};
+use super::{BlockID, FsError, BLOCKID_SIZE, PTR_SIZE};
 
 #[derive(Debug)]
 pub struct Object {

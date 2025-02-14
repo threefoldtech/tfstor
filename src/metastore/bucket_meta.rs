@@ -5,7 +5,7 @@ use std::{
 
 use chrono::Utc;
 
-use crate::cas::{errors::FsError, fs::PTR_SIZE};
+use super::{FsError, PTR_SIZE};
 
 #[derive(Debug)]
 pub struct BucketMeta {
