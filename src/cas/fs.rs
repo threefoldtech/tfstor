@@ -170,13 +170,7 @@ impl CasFS {
         Ok(())
     }
 
-    pub fn part_storage_key(
-        &self,
-        bucket: &str,
-        key: &str,
-        upload_id: &str,
-        part_number: i64,
-    ) -> String {
+    fn part_key(&self, bucket: &str, key: &str, upload_id: &str, part_number: i64) -> String {
         format!("{}-{}-{}-{}", bucket, key, upload_id, part_number)
     }
 
@@ -193,12 +187,36 @@ impl CasFS {
     ) -> Result<(), MetaError> {
         let mp_map = self.multipart_tree()?;
 
-        let storage_key = self.part_storage_key(&bucket, &key, &upload_id, part_number);
+        let storage_key = self.part_key(&bucket, &key, &upload_id, part_number);
 
         let mp = MultiPart::new(size, part_number, bucket, key, upload_id, hash, blocks);
 
         mp_map.insert(storage_key.as_bytes(), mp.to_vec())?;
         Ok(())
+    }
+
+    pub fn get_multipart_part(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: i64,
+    ) -> Result<MultiPart, MetaError> {
+        let mp_map = self.multipart_tree()?;
+        let part_key = self.part_key(bucket, key, upload_id, part_number);
+        mp_map.get_multipart_part(part_key.as_bytes())
+    }
+
+    pub fn remove_multipart_part(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: i64,
+    ) -> Result<(), MetaError> {
+        let mp_map = self.multipart_tree()?;
+        let part_key = self.part_key(bucket, key, upload_id, part_number);
+        mp_map.remove(part_key.as_bytes())
     }
 
     pub fn key_exists(&self, bucket: &str, key: &str) -> Result<bool, MetaError> {

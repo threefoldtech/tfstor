@@ -28,7 +28,9 @@ use s3s::S3Result;
 use s3s::S3;
 use s3s::{S3Request, S3Response};
 
-use crate::cas::{block_stream::BlockStream, range_request::parse_range_request, CasFS};
+use crate::cas::{
+    block::BlockID, block_stream::BlockStream, range_request::parse_range_request, CasFS,
+};
 use crate::metrics::SharedMetrics;
 
 const MAX_KEYS: i32 = 1000;
@@ -62,6 +64,22 @@ impl S3FS {
             metrics,
         }
     }
+
+    // Compute the e_tag of the multpart upload. Per the S3 standard (according to minio), the
+    // e_tag of a multipart uploaded object is the Md5 of the Md5 of the parts.
+    fn calculate_multipart_etag(&self, blocks: &[BlockID]) -> io::Result<([u8; 16], usize)> {
+        let mut hasher = Md5::new();
+        let mut size = 0;
+        let block_map = self.casfs.block_tree()?;
+
+        for block in blocks {
+            let block_info = block_map.get_block(block).expect("Block data is corrupt");
+            size += block_info.size();
+            hasher.update(block);
+        }
+
+        Ok((hasher.finalize().into(), size))
+    }
 }
 
 fn fmt_content_range(start: u64, end_inclusive: u64, size: u64) -> String {
@@ -89,11 +107,10 @@ impl S3 for S3FS {
             return Err(err);
         };
 
-        let multipart_map = try_!(self.casfs.multipart_tree());
-
         let mut blocks = vec![];
         let mut cnt: i32 = 0;
         for part in multipart_upload.parts.iter().flatten() {
+            // validate part number
             let part_number = try_!(part
                 .part_number
                 .ok_or_else(|| { io::Error::new(io::ErrorKind::NotFound, "Missing part_number") }));
@@ -104,31 +121,24 @@ impl S3 for S3FS {
                     "InvalidPartOrder"
                 )));
             }
-            let part_key =
-                self.casfs
-                    .part_storage_key(&bucket, &key, &upload_id, part_number as i64);
 
-            let mp = match multipart_map.get_multipart_part(part_key.as_bytes()) {
+            let result =
+                self.casfs
+                    .get_multipart_part(&bucket, &key, &upload_id, part_number as i64);
+            let mp = match result {
                 Ok(mp) => mp,
                 Err(e) => {
-                    error!("Missing part \"{}\" in multipart upload: {}", part_key, e);
+                    error!(
+                        "Missing part \"{}\" in multipart upload: {}",
+                        part_number, e
+                    );
                     return Err(s3_error!(InvalidArgument, "Part not uploaded"));
                 }
             };
             blocks.extend_from_slice(mp.blocks());
         }
 
-        // Compute the e_tag of the multpart upload. Per the S3 standard (according to minio), the
-        // e_tag of a multipart uploaded object is the Md5 of the Md5 of the parts.
-        let mut hasher = Md5::new();
-        let mut size = 0;
-        let block_map = try_!(self.casfs.block_tree());
-        for block in &blocks {
-            let block_info = block_map.get_block(block).expect("Block data is corrupt");
-            size += block_info.size();
-            hasher.update(block);
-        }
-        let e_tag = hasher.finalize().into();
+        let (e_tag, size) = try_!(self.calculate_multipart_etag(&blocks));
 
         let object_meta = try_!(self.casfs.create_object_meta(
             &bucket,
@@ -141,15 +151,12 @@ impl S3 for S3FS {
 
         // Try to delete the multipart metadata. If this fails, it is not really an issue.
         for part in multipart_upload.parts.into_iter().flatten() {
-            let part_key = format!(
-                "{}-{}-{}-{}",
+            if let Err(e) = self.casfs.remove_multipart_part(
                 &bucket,
                 &key,
                 &upload_id,
-                part.part_number.unwrap()
-            );
-
-            if let Err(e) = multipart_map.remove(part_key.as_bytes()) {
+                part.part_number.unwrap() as i64,
+            ) {
                 error!("Could not remove part: {}", e);
             };
         }
