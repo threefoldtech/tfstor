@@ -233,8 +233,8 @@ impl S3 for S3FS {
 
         let DeleteObjectInput { bucket, key, .. } = req.input;
 
-        if !try_!(self.casfs.bucket_exists(&bucket)) {
-            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
+        if !try_!(self.casfs.key_exists(&bucket, &key)) {
+            return Err(s3_error!(NoSuchKey, "Key does not exist"));
         }
 
         // TODO: check for the key existence?

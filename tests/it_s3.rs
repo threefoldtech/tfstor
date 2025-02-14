@@ -124,7 +124,7 @@ async fn create_bucket(c: &Client, bucket: &str) -> Result<()> {
 
 #[tokio::test]
 #[tracing::instrument]
-async fn test_single_object() -> Result<()> {
+async fn test_put_delete_object() -> Result<()> {
     let _guard = serial().await;
 
     let c = Client::new(config());
@@ -137,7 +137,9 @@ async fn test_single_object() -> Result<()> {
 
     create_bucket(&c, bucket).await?;
 
+    // happy path
     {
+        // put the object
         let body = ByteStream::from_static(content.as_bytes());
         c.put_object()
             .bucket(bucket)
@@ -146,9 +148,8 @@ async fn test_single_object() -> Result<()> {
             //.checksum_crc32_c(crc32c.as_str())
             .send()
             .await?;
-    }
 
-    {
+        // get the object
         let ans = c
             .get_object()
             .bucket(bucket)
@@ -157,6 +158,7 @@ async fn test_single_object() -> Result<()> {
             .send()
             .await?;
 
+        // checkings
         let content_length: usize = ans.content_length().unwrap().try_into().unwrap();
         //let checksum_crc32c = ans.checksum_crc32_c.unwrap();
         let body = ans.body.collect().await?.into_bytes();
@@ -167,14 +169,40 @@ async fn test_single_object() -> Result<()> {
     }
 
     {
-        delete_object(&c, bucket, key).await?;
-        delete_bucket(&c, bucket).await?;
-        let result = delete_object(&c, bucket, key).await;
-        assert!(
-            result.is_err(),
-            "Expected error when deleting non-existent object"
-        );
+        // put to non existent bucket
+
+        // put the object
+        let body = ByteStream::from_static(content.as_bytes());
+        let result = c
+            .put_object()
+            .bucket("non-existent-bucket")
+            .key(key)
+            .body(body)
+            //.checksum_crc32_c(crc32c.as_str())
+            .send()
+            .await;
+        assert!(result.is_err());
     }
+
+    {
+        // delete the object
+        let result = c
+            .delete_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .unwrap();
+        assert!(result.delete_marker().is_none());
+
+        // delete non existent object
+
+        let result = c.delete_object().bucket(bucket).key(key).send().await;
+        assert!(result.is_err());
+    }
+
+    // cleanup
+    delete_bucket(&c, bucket).await?;
 
     Ok(())
 }
