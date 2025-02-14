@@ -1,12 +1,15 @@
 use std::sync::Arc;
 use std::{io, mem, path::PathBuf};
 
-use super::{buffered_byte_stream::BufferedByteStream, multipart::MultiPart};
+use super::{
+    buffered_byte_stream::BufferedByteStream,
+    multipart::{MultiPart, MultiPartTree},
+};
 use crate::metrics::SharedMetrics;
 
 use crate::metastore::{
     BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, FjallStore, MetaError, MetaStore,
-    MultiPartTree, Object,
+    Object,
 };
 
 use faster_hex::hex_string;
@@ -68,6 +71,7 @@ pub struct CasFS {
     meta_store: Box<dyn MetaStore>,
     root: PathBuf,
     metrics: SharedMetrics,
+    multipart_tree: Arc<MultiPartTree>,
 }
 
 pub enum StorageEngine {
@@ -89,10 +93,14 @@ impl CasFS {
 
         // Get the current amount of buckets
         //metrics.set_bucket_count(db.open_tree(BUCKET_META_TREE).unwrap().len());
+
+        let tree = meta_store.get_tree("_MULTIPART_PARTS").unwrap();
+        let multipart_tree = MultiPartTree::new(tree);
         Self {
             meta_store,
             root,
             metrics,
+            multipart_tree: Arc::new(multipart_tree),
         }
     }
 
@@ -110,10 +118,6 @@ impl CasFS {
     /// Open the tree containing the block map.
     pub fn block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError> {
         self.meta_store.get_block_tree()
-    }
-
-    pub fn multipart_tree(&self) -> Result<Box<dyn MultiPartTree>, MetaError> {
-        self.meta_store.get_multipart_tree()
     }
 
     /// Check if a bucket with a given name exists.
@@ -187,13 +191,13 @@ impl CasFS {
         hash: BlockID,
         blocks: Vec<BlockID>,
     ) -> Result<(), MetaError> {
-        let mp_map = self.multipart_tree()?;
+        let mp_map = self.multipart_tree.clone();
 
         let storage_key = self.part_key(&bucket, &key, &upload_id, part_number);
 
         let mp = MultiPart::new(size, part_number, bucket, key, upload_id, hash, blocks);
 
-        mp_map.insert(storage_key.as_bytes(), mp.to_vec())?;
+        mp_map.insert(storage_key.as_bytes(), mp)?;
         Ok(())
     }
 
@@ -204,7 +208,7 @@ impl CasFS {
         upload_id: &str,
         part_number: i64,
     ) -> Result<MultiPart, MetaError> {
-        let mp_map = self.multipart_tree()?;
+        let mp_map = self.multipart_tree.clone();
         let part_key = self.part_key(bucket, key, upload_id, part_number);
         mp_map.get_multipart_part(part_key.as_bytes())
     }
@@ -216,7 +220,7 @@ impl CasFS {
         upload_id: &str,
         part_number: i64,
     ) -> Result<(), MetaError> {
-        let mp_map = self.multipart_tree()?;
+        let mp_map = self.multipart_tree.clone();
         let part_key = self.part_key(bucket, key, upload_id, part_number);
         mp_map.remove(part_key.as_bytes())
     }

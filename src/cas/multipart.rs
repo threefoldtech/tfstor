@@ -2,7 +2,7 @@ use std::convert::{TryFrom, TryInto};
 
 use super::{errors::FsError, fs::PTR_SIZE};
 
-use crate::metastore::{BlockID, BLOCKID_SIZE};
+use crate::metastore::{BaseMetaTree, BlockID, MetaError, BLOCKID_SIZE};
 
 #[derive(Debug)]
 pub struct MultiPart {
@@ -161,5 +161,36 @@ impl TryFrom<&[u8]> for MultiPart {
                 .unwrap(),
             blocks,
         })
+    }
+}
+
+pub struct MultiPartTree {
+    tree: Box<dyn BaseMetaTree>,
+}
+// Implement Debug manually
+impl std::fmt::Debug for MultiPartTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MultiPartTree")
+            .field("tree", &"<BaseMetaTree>")
+            .finish()
+    }
+}
+impl MultiPartTree {
+    pub fn new(tree: Box<dyn BaseMetaTree>) -> Self {
+        Self { tree }
+    }
+
+    pub fn insert(&self, key: &[u8], mp: MultiPart) -> Result<(), MetaError> {
+        self.tree.insert(key, mp.to_vec())
+    }
+
+    pub fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
+        self.tree.remove(key)
+    }
+
+    pub fn get_multipart_part(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
+        let value = self.tree.get(key)?;
+        let mp = MultiPart::try_from(value.as_ref()).expect("Corrupted multipart data");
+        Ok(mp)
     }
 }

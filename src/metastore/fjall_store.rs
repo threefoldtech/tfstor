@@ -7,17 +7,14 @@ use fjall;
 
 use super::{
     AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTree, BucketTreeExt,
-    MetaError, MetaStore, MultiPartTree, Object, BLOCKID_SIZE,
+    MetaError, MetaStore, Object, BLOCKID_SIZE,
 };
-
-use crate::cas::multipart::MultiPart;
 
 pub struct FjallStore {
     keyspace: Arc<fjall::TxKeyspace>,
     bucket_partition: Arc<fjall::TxPartitionHandle>,
     block_partition: Arc<fjall::TxPartitionHandle>,
     path_partition: Arc<fjall::TxPartitionHandle>,
-    multipart_partition: Arc<fjall::TxPartitionHandle>,
 }
 
 impl std::fmt::Debug for FjallStore {
@@ -34,7 +31,6 @@ impl FjallStore {
         const BUCKET_META_PARTITION: &str = "_BUCKETS";
         const BLOCK_PARTITION: &str = "_BLOCKS";
         const PATH_PARTITION: &str = "_PATHS";
-        const MULTIPART_PARTITION: &str = "_MULTIPART_PARTS";
 
         let tx_keyspace = fjall::Config::new(path).open_transactional().unwrap();
         let bucket_partition = tx_keyspace
@@ -46,15 +42,11 @@ impl FjallStore {
         let path_partition = tx_keyspace
             .open_partition(PATH_PARTITION, Default::default())
             .unwrap();
-        let multipart_partition = tx_keyspace
-            .open_partition(MULTIPART_PARTITION, Default::default())
-            .unwrap();
         Self {
             keyspace: Arc::new(tx_keyspace),
             bucket_partition: Arc::new(bucket_partition),
             block_partition: Arc::new(block_partition),
             path_partition: Arc::new(path_partition),
-            multipart_partition: Arc::new(multipart_partition),
         }
     }
 
@@ -110,17 +102,18 @@ impl MetaStore for FjallStore {
         )))
     }
 
+    fn get_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        let partition = self.get_partition(name)?;
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            Arc::new(partition),
+        )))
+    }
+
     fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
             self.path_partition.clone(),
-        )))
-    }
-
-    fn get_multipart_tree(&self) -> Result<Box<dyn MultiPartTree>, MetaError> {
-        Ok(Box::new(FjallTree::new(
-            self.keyspace.clone(),
-            self.multipart_partition.clone(),
         )))
     }
 
@@ -313,6 +306,10 @@ impl BaseMetaTree for FjallTree {
             Err(_) => Err(MetaError::KeyNotFound),
         }
     }
+
+    fn get(&self, key: &[u8]) -> Result<Vec<u8>, MetaError> {
+        self.get(key).map(|v| v.to_vec())
+    }
 }
 
 impl BucketTree for FjallTree {
@@ -350,15 +347,6 @@ impl BlockTree for FjallTree {
             Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
         Ok(block)
-    }
-}
-
-impl MultiPartTree for FjallTree {
-    fn get_multipart_part(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
-        let part_data = self.get(key)?;
-        // unwrap here is safe as it is a coding error
-        let mp = MultiPart::try_from(&*part_data).expect("Corrupted multipart data");
-        Ok(mp)
     }
 }
 

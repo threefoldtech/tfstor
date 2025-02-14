@@ -4,7 +4,7 @@ use super::{
     object::Object,
     MetaError,
 };
-use crate::cas::multipart::MultiPart;
+
 use std::fmt::Debug;
 
 /// MetaStore is the interface that defines the methods to interact with the metadata store.
@@ -29,12 +29,11 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// This tree is used to store the data block metadata.
     fn get_block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError>;
 
+    fn get_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+
     /// get_path_tree returns the path meta tree
     /// This tree is used to store the file path metadata.
     fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError>;
-
-    /// get_multipart_tree returns the multipart meta tree
-    fn get_multipart_tree(&self) -> Result<Box<dyn MultiPartTree>, MetaError>;
 
     /// bucket_exists returns true if the bucket exists.
     fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError>;
@@ -96,6 +95,8 @@ pub trait BaseMetaTree: Send + Sync {
     fn remove(&self, key: &[u8]) -> Result<(), MetaError>;
 
     fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError>;
+
+    fn get(&self, key: &[u8]) -> Result<Vec<u8>, MetaError>;
 }
 
 pub trait AllBucketsTree: BaseMetaTree {}
@@ -114,11 +115,6 @@ pub trait BucketTree: BaseMetaTree {
 pub trait BlockTree: Send + Sync {
     /// get_block_obj returns the `Object` for the given key.
     fn get_block(&self, key: &[u8]) -> Result<Block, MetaError>;
-}
-
-pub trait MultiPartTree: BaseMetaTree {
-    /// get_multipart_part_obj returns the `MultiPart` for the given key.
-    fn get_multipart_part(&self, key: &[u8]) -> Result<MultiPart, MetaError>;
 }
 
 pub trait BucketTreeExt: BaseMetaTree {
