@@ -1,10 +1,10 @@
 use super::{
     block::{Block, BlockID},
     bucket_meta::BucketMeta,
-    meta_errors::MetaError,
-    multipart::MultiPart,
     object::Object,
+    MetaError,
 };
+use crate::cas::multipart::MultiPart;
 use std::fmt::Debug;
 
 /// MetaStore is the interface that defines the methods to interact with the metadata store.

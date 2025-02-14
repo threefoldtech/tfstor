@@ -1,9 +1,10 @@
-use super::{errors::FsError, fs::PTR_SIZE};
 use faster_hex::hex_string;
 use std::{
     convert::{TryFrom, TryInto},
     path::PathBuf,
 };
+
+use crate::cas::{errors::FsError, fs::PTR_SIZE};
 
 pub const BLOCKID_SIZE: usize = 16;
 

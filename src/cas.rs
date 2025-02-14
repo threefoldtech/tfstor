@@ -1,14 +1,8 @@
 pub mod block_stream;
-pub mod meta_store;
 pub mod multipart;
 pub mod range_request;
 pub use fs::CasFS;
 pub use fs::StorageEngine;
-pub mod block;
-mod bucket_meta;
 mod buffered_byte_stream;
-mod errors;
-mod fjall_store;
-mod fs;
-pub mod meta_errors;
-pub mod object;
+pub mod errors;
+pub mod fs;

@@ -1,15 +1,15 @@
-use super::{
-    block::{BlockID, BLOCKID_SIZE},
-    errors::FsError,
-    fs::PTR_SIZE,
-};
-use chrono::{SecondsFormat, TimeZone, Utc};
-use faster_hex::hex_string;
 use std::{
     convert::{TryFrom, TryInto},
     time::SystemTime,
     time::UNIX_EPOCH,
 };
+
+use chrono::{SecondsFormat, TimeZone, Utc};
+use faster_hex::hex_string;
+
+use super::{BlockID, BLOCKID_SIZE};
+
+use crate::cas::{errors::FsError, fs::PTR_SIZE};
 
 #[derive(Debug)]
 pub struct Object {

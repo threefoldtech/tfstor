@@ -1,9 +1,8 @@
-use super::{
-    block::{BlockID, BLOCKID_SIZE},
-    errors::FsError,
-    fs::PTR_SIZE,
-};
 use std::convert::{TryFrom, TryInto};
+
+use super::{errors::FsError, fs::PTR_SIZE};
+
+use crate::metastore::{BlockID, BLOCKID_SIZE};
 
 #[derive(Debug)]
 pub struct MultiPart {

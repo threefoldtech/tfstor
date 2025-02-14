@@ -1,9 +1,11 @@
-use super::{errors::FsError, fs::PTR_SIZE};
-use chrono::Utc;
 use std::{
     convert::{TryFrom, TryInto},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use chrono::Utc;
+
+use crate::cas::{errors::FsError, fs::PTR_SIZE};
 
 #[derive(Debug)]
 pub struct BucketMeta {

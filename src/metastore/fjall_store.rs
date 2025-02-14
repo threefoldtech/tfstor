@@ -6,16 +6,11 @@ use std::sync::Arc;
 use fjall;
 
 use super::{
-    block::{Block, BlockID, BLOCKID_SIZE},
-    bucket_meta::BucketMeta,
-    meta_errors::MetaError,
-    meta_store::{
-        AllBucketsTree, BaseMetaTree, BlockTree, BucketTree, BucketTreeExt, MetaStore,
-        MultiPartTree,
-    },
-    multipart::MultiPart,
-    object::Object,
+    AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTree, BucketTreeExt,
+    MetaError, MetaStore, MultiPartTree, Object, BLOCKID_SIZE,
 };
+
+use crate::cas::multipart::MultiPart;
 
 pub struct FjallStore {
     keyspace: Arc<fjall::TxKeyspace>,

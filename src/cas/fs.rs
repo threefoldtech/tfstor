@@ -1,11 +1,13 @@
 use std::sync::Arc;
 use std::{io, mem, path::PathBuf};
 
-use super::{
-    block::BlockID, bucket_meta::BucketMeta, buffered_byte_stream::BufferedByteStream, fjall_store,
-    meta_errors::MetaError, meta_store, multipart::MultiPart, object::Object,
-};
+use super::{buffered_byte_stream::BufferedByteStream, multipart::MultiPart};
 use crate::metrics::SharedMetrics;
+
+use crate::metastore::{
+    BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, FjallStore, MetaError, MetaStore,
+    MultiPartTree, Object,
+};
 
 use faster_hex::hex_string;
 use futures::{
@@ -63,7 +65,7 @@ impl Drop for PendingMarker {
 
 #[derive(Debug)]
 pub struct CasFS {
-    meta_store: Box<dyn meta_store::MetaStore>,
+    meta_store: Box<dyn MetaStore>,
     root: PathBuf,
     metrics: SharedMetrics,
 }
@@ -81,8 +83,8 @@ impl CasFS {
     ) -> Self {
         meta_path.push("db");
         root.push("blocks");
-        let meta_store: Box<dyn meta_store::MetaStore> = match storage_engine {
-            StorageEngine::Fjall => Box::new(fjall_store::FjallStore::new(meta_path)),
+        let meta_store: Box<dyn MetaStore> = match storage_engine {
+            StorageEngine::Fjall => Box::new(FjallStore::new(meta_path)),
         };
 
         // Get the current amount of buckets
@@ -94,23 +96,23 @@ impl CasFS {
         }
     }
 
-    fn path_tree(&self) -> Result<Box<dyn meta_store::BaseMetaTree>, MetaError> {
+    fn path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         self.meta_store.get_path_tree()
     }
 
     pub fn get_bucket(
         &self,
         bucket_name: &str,
-    ) -> Result<Box<dyn meta_store::BucketTreeExt + Send + Sync>, MetaError> {
+    ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
         self.meta_store.get_bucket_ext(bucket_name)
     }
 
     /// Open the tree containing the block map.
-    pub fn block_tree(&self) -> Result<Box<dyn meta_store::BlockTree>, MetaError> {
+    pub fn block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError> {
         self.meta_store.get_block_tree()
     }
 
-    pub fn multipart_tree(&self) -> Result<Box<dyn meta_store::MultiPartTree>, MetaError> {
+    pub fn multipart_tree(&self) -> Result<Box<dyn MultiPartTree>, MetaError> {
         self.meta_store.get_multipart_tree()
     }
 
