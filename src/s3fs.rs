@@ -72,7 +72,12 @@ impl S3FS {
         let block_map = self.casfs.block_tree()?;
 
         for block in blocks {
-            let block_info = block_map.get_block(block).expect("Block data is corrupt");
+            let block_info = match block_map.get_block(block).expect("Block data is corrupt") {
+                Some(block_info) => block_info,
+                None => {
+                    return Err(io::Error::new(io::ErrorKind::NotFound, "Block  not found"));
+                }
+            };
             size += block_info.size();
             hasher.update(block);
         }
@@ -125,7 +130,14 @@ impl S3 for S3FS {
                 self.casfs
                     .get_multipart_part(&bucket, &key, &upload_id, part_number as i64);
             let mp = match result {
-                Ok(mp) => mp,
+                Ok(Some(mp)) => mp,
+                Ok(None) => {
+                    error!(
+                        "Missing part \"{}\" in multipart upload: part not found",
+                        part_number
+                    );
+                    return Err(s3_error!(InvalidArgument, "Part not uploaded"));
+                }
                 Err(e) => {
                     error!(
                         "Missing part \"{}\" in multipart upload: {}",
@@ -333,7 +345,16 @@ impl S3 for S3FS {
         }
 
         // load metadata
-        let obj_meta = try_!(self.casfs.get_object_meta(&bucket, &key));
+        let obj_meta = match self.casfs.get_object_meta(&bucket, &key) {
+            Ok(Some(obj_meta)) => obj_meta,
+            Ok(None) => {
+                return Err(s3_error!(NoSuchKey, "Object does not exist"));
+            }
+            Err(e) => {
+                error!("Could not get object metadata: {}", e);
+                return Err(s3_error!(ServiceUnavailable, "service unavailable"));
+            }
+        };
 
         let e_tag = obj_meta.format_e_tag();
         let stream_size = obj_meta.size();
@@ -352,7 +373,22 @@ impl S3 for S3FS {
         for block in obj_meta.blocks() {
             // unwrap here is safe as we only add blocks to the list of an object if they are
             // corectly inserted in the block map
-            let block_meta = try_!(block_map.get_block(block));
+            let block_meta = match block_map.get_block(block) {
+                Ok(Some(block_meta)) => block_meta,
+                Ok(None) => {
+                    return Err(s3_error!(
+                        InternalError,
+                        "Could not find block in block map"
+                    ));
+                }
+                Err(e) => {
+                    return Err(s3_error!(
+                        InternalError,
+                        "Could not get block from block map: {}",
+                        e
+                    ));
+                }
+            };
             block_size += block_meta.size();
             paths.push((block_meta.disk_path(self.root.clone()), block_meta.size()));
         }
@@ -398,7 +434,16 @@ impl S3 for S3FS {
             return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
         }
 
-        let obj_meta = try_!(self.casfs.get_object_meta(&bucket, &key));
+        let obj_meta = match self.casfs.get_object_meta(&bucket, &key) {
+            Ok(Some(obj_meta)) => obj_meta,
+            Ok(None) => {
+                return Err(s3_error!(NoSuchKey, "Object does not exist"));
+            }
+            Err(e) => {
+                error!("Could not get object metadata: {}", e);
+                return Err(s3_error!(ServiceUnavailable, "service unavailable"));
+            }
+        };
 
         let output = HeadObjectOutput {
             content_length: Some(obj_meta.size() as i64),

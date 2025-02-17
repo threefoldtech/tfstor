@@ -186,9 +186,13 @@ impl MultiPartTree {
         self.tree.remove(key)
     }
 
-    pub fn get_multipart_part(&self, key: &[u8]) -> Result<MultiPart, MetaError> {
-        let value = self.tree.get(key)?;
+    pub fn get_multipart_part(&self, key: &[u8]) -> Result<Option<MultiPart>, MetaError> {
+        let value = match self.tree.get(key) {
+            Ok(Some(v)) => v,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(e),
+        };
         let mp = MultiPart::try_from(value.as_ref()).expect("Corrupted multipart data");
-        Ok(mp)
+        Ok(Some(mp))
     }
 }

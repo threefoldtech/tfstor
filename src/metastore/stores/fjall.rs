@@ -276,10 +276,10 @@ impl FjallTree {
         }
     }
 
-    fn get(&self, key: &[u8]) -> Result<fjall::Slice, MetaError> {
+    fn get(&self, key: &[u8]) -> Result<Option<fjall::Slice>, MetaError> {
         match self.partition.get(key) {
-            Ok(Some(v)) => Ok(v),
-            Ok(None) => Err(MetaError::KeyNotFound),
+            Ok(Some(v)) => Ok(Some(v)),
+            Ok(None) => Ok(None),
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
@@ -307,8 +307,12 @@ impl BaseMetaTree for FjallTree {
         }
     }
 
-    fn get(&self, key: &[u8]) -> Result<Vec<u8>, MetaError> {
-        self.get(key).map(|v| v.to_vec())
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError> {
+        match self.get(key) {
+            Ok(Some(v)) => Ok(Some(v.to_vec())),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -326,27 +330,33 @@ impl BucketTree for FjallTree {
         Ok(())
     }
 
-    fn get_meta(&self, key: &str) -> Result<Object, MetaError> {
+    fn get_meta(&self, key: &str) -> Result<Option<Object>, MetaError> {
         let read_tx = self.keyspace.read_tx();
         let raw_object = match read_tx.get(&self.partition, key) {
             Ok(Some(o)) => o,
-            Ok(None) => return Err(MetaError::KeyNotFound),
+            Ok(None) => return Ok(None),
             Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
 
-        Ok(Object::try_from(&*raw_object).expect("Malformed object"))
+        Ok(Some(
+            Object::try_from(&*raw_object).expect("Malformed object"),
+        ))
     }
 }
 
 impl BlockTree for FjallTree {
-    fn get_block(&self, key: &[u8]) -> Result<Block, MetaError> {
-        let block_data = self.get(key)?;
+    fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError> {
+        let block_data = match self.get(key) {
+            Ok(Some(b)) => b,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
+        };
 
         let block = match Block::try_from(&*block_data) {
             Ok(b) => b,
             Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
-        Ok(block)
+        Ok(Some(block))
     }
 }
 
@@ -509,12 +519,12 @@ mod tests {
         bucket.insert_meta(key, test_obj.to_vec()).unwrap();
 
         // Test object retrieval
-        let retrieved_obj = bucket.get_meta(key).unwrap();
+        let retrieved_obj = bucket.get_meta(key).unwrap().unwrap();
         assert_eq!(retrieved_obj.blocks().len(), 1);
         assert_eq!(retrieved_obj.blocks()[0], BlockID::from([1; 16]));
 
         // Test error cases of object retrieval
-        assert!(bucket.get_meta("nonexistent-key").is_err());
+        assert!(bucket.get_meta("nonexistent-key").unwrap().is_none());
     }
 
     #[test]
@@ -531,7 +541,7 @@ mod tests {
             .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
         let bucket = store.get_bucket_tree(bucket_name).unwrap();
-        assert!(bucket.get_meta("nonexistent").is_err());
+        assert!(bucket.get_meta("nonexistent").unwrap().is_none());
     }
 
     #[test]

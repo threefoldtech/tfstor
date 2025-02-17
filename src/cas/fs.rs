@@ -141,7 +141,11 @@ impl CasFS {
     }
 
     // get meta object from the DB
-    pub fn get_object_meta(&self, bucket_name: &str, key: &str) -> Result<Object, MetaError> {
+    pub fn get_object_meta(
+        &self,
+        bucket_name: &str,
+        key: &str,
+    ) -> Result<Option<Object>, MetaError> {
         let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
         bucket.get_meta(key)
     }
@@ -206,7 +210,7 @@ impl CasFS {
         key: &str,
         upload_id: &str,
         part_number: i64,
-    ) -> Result<MultiPart, MetaError> {
+    ) -> Result<Option<MultiPart>, MetaError> {
         let mp_map = self.multipart_tree.clone();
         let part_key = self.part_key(bucket, key, upload_id, part_number);
         mp_map.get_multipart_part(part_key.as_bytes())
@@ -293,8 +297,8 @@ impl CasFS {
         data: ByteStream,
     ) -> io::Result<(Vec<BlockID>, BlockID, u64)> {
         let old_obj_meta = match self.get_object_meta(bucket_name, key) {
-            Ok(obj_meta) => Some(obj_meta),
-            Err(_) => None,
+            Ok(Some(obj_meta)) => Some(obj_meta),
+            _ => None,
         };
         let old_obj_meta = Arc::new(old_obj_meta);
 
@@ -461,7 +465,7 @@ mod tests {
 
         // Verify block & path was stored
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        let stored_block = block_tree.get_block(&block_ids[0]).unwrap();
+        let stored_block = block_tree.get_block(&block_ids[0]).unwrap().unwrap();
         assert_eq!(stored_block.size(), test_data_len);
         assert_eq!(stored_block.rc(), 1);
         assert_eq!(
@@ -487,7 +491,7 @@ mod tests {
 
         assert_eq!(new_blocks, block_ids);
 
-        let stored_block = block_tree.get_block(&new_blocks[0]).unwrap();
+        let stored_block = block_tree.get_block(&new_blocks[0]).unwrap().unwrap();
         assert_eq!(stored_block.rc(), 2);
     }
 
@@ -517,7 +521,7 @@ mod tests {
 
         // Initial refcount must be 1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        let stored_block = block_tree.get_block(&block_ids[0]).unwrap();
+        let stored_block = block_tree.get_block(&block_ids[0]).unwrap().unwrap();
         assert_eq!(stored_block.rc(), 1);
 
         {
@@ -536,7 +540,7 @@ mod tests {
 
             assert_eq!(new_blocks, block_ids);
 
-            let stored_block = block_tree.get_block(&new_blocks[0]).unwrap();
+            let stored_block = block_tree.get_block(&new_blocks[0]).unwrap().unwrap();
             assert_eq!(stored_block.rc(), 1);
         }
         {
@@ -554,7 +558,7 @@ mod tests {
 
             assert_eq!(new_blocks, block_ids);
 
-            let stored_block = block_tree.get_block(&new_blocks[0]).unwrap();
+            let stored_block = block_tree.get_block(&new_blocks[0]).unwrap().unwrap();
             assert_eq!(stored_block.rc(), 2);
         }
     }
@@ -591,7 +595,7 @@ mod tests {
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         let mut stored_paths = Vec::new();
         for id in block_ids.clone() {
-            let block = block_tree.get_block(&id).unwrap();
+            let block = block_tree.get_block(&id).unwrap().unwrap();
             assert_eq!(
                 fs.path_tree().unwrap().contains_key(block.path()).unwrap(),
                 true
@@ -609,7 +613,7 @@ mod tests {
         // Verify blocks were cleaned up
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         for id in block_ids {
-            assert!(block_tree.get_block(&id).is_err());
+            assert!(block_tree.get_block(&id).unwrap().is_none());
         }
         // Verify paths were cleaned up
         for path in stored_paths {
@@ -651,7 +655,7 @@ mod tests {
         // Verify blocks  exist with rc=1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         for id in &block_ids1 {
-            let block = block_tree.get_block(id).unwrap();
+            let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
 
@@ -672,7 +676,7 @@ mod tests {
         // Verify blocks  exist with rc=2
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         for id in &block_ids2 {
-            let block = block_tree.get_block(id).unwrap();
+            let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 2);
         }
 
@@ -682,7 +686,7 @@ mod tests {
         // Verify blocks still exist
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         for id in &block_ids1 {
-            let block = block_tree.get_block(id).unwrap();
+            let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
 
@@ -691,7 +695,7 @@ mod tests {
 
         // Verify blocks are gone
         for id in block_ids1 {
-            assert!(block_tree.get_block(&id).is_err());
+            assert!(block_tree.get_block(&id).unwrap().is_none());
         }
     }
 
@@ -726,7 +730,7 @@ mod tests {
         // Verify blocks  exist with rc=1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         for id in &block_ids1 {
-            let block = block_tree.get_block(id).unwrap();
+            let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
 
@@ -747,7 +751,7 @@ mod tests {
         // Verify blocks  exist with rc=2
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         for id in &block_ids2 {
-            let block = block_tree.get_block(id).unwrap();
+            let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
 
@@ -756,7 +760,7 @@ mod tests {
 
         // Verify blocks are gone
         for id in block_ids1 {
-            assert!(block_tree.get_block(&id).is_err());
+            assert!(block_tree.get_block(&id).unwrap().is_none());
         }
     }
 }

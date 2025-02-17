@@ -96,7 +96,7 @@ pub trait BaseMetaTree: Send + Sync {
 
     fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError>;
 
-    fn get(&self, key: &[u8]) -> Result<Vec<u8>, MetaError>;
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError>;
 }
 
 pub trait AllBucketsTree: BaseMetaTree {}
@@ -109,12 +109,12 @@ pub trait BucketTree: BaseMetaTree {
 
     /// get_meta returns the Object metadata for the given bucket and key.
     /// We return the Object struct instead of the raw bytes for performance reason.
-    fn get_meta(&self, key: &str) -> Result<Object, MetaError>;
+    fn get_meta(&self, key: &str) -> Result<Option<Object>, MetaError>;
 }
 
 pub trait BlockTree: Send + Sync {
     /// get_block_obj returns the `Object` for the given key.
-    fn get_block(&self, key: &[u8]) -> Result<Block, MetaError>;
+    fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError>;
 }
 
 pub trait BucketTreeExt: BaseMetaTree {
