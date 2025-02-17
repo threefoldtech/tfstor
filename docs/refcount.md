@@ -18,6 +18,7 @@ When the refcount reaches zero, the data block can be deleted.
 - If a new key reuses the block, `refcount` will be increased by one.
 - Deleting the object will reduce the `refcount` value.
 - When the `refcount` value reaches zero, the object must be deleted.
+- if a key is updated with different blocks, if the block is not used anymore its `refcount` also needs to be decreased.
 
 **Failure cases:**
 - when writing/reusing block, failed to write the metadata or increase the `refcount`
