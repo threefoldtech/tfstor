@@ -338,9 +338,8 @@ impl BucketTree for FjallTree {
             Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
         };
 
-        Ok(Some(
-            Object::try_from(&*raw_object).expect("Malformed object"),
-        ))
+        let obj = Object::try_from(&*raw_object).expect("Malformed object bro");
+        Ok(Some(obj))
     }
 }
 
