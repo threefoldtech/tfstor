@@ -9,7 +9,7 @@ use crate::metrics::SharedMetrics;
 
 use crate::metastore::{
     BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, FjallStore, MetaError, MetaStore,
-    Object,
+    Object, ObjectData,
 };
 
 use faster_hex::hex_string;
@@ -131,10 +131,10 @@ impl CasFS {
         key: &str,
         size: u64,
         e_tag: BlockID,
-        parts: usize,
         blocks: Vec<BlockID>,
+        object_data: ObjectData,
     ) -> Result<Object, MetaError> {
-        let obj_meta = Object::new(size, e_tag, parts, blocks);
+        let obj_meta = Object::new(size, e_tag, blocks, object_data);
         let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
         bucket.insert_meta(key, obj_meta.to_vec())?;
         Ok(obj_meta)
@@ -276,7 +276,14 @@ impl CasFS {
     ) -> io::Result<(Object, Vec<BlockID>, BlockID, u64)> {
         let (blocks, content_hash, size) = self.store_object(bucket_name, key, data).await?;
         let obj = self
-            .create_object_meta(bucket_name, key, size, content_hash, 0, blocks.clone())
+            .create_object_meta(
+                bucket_name,
+                key,
+                size,
+                content_hash,
+                blocks.clone(),
+                ObjectData::SinglePart,
+            )
             .unwrap();
         Ok((obj, blocks, content_hash, size))
     }

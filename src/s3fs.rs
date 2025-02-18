@@ -29,7 +29,7 @@ use s3s::S3;
 use s3s::{S3Request, S3Response};
 
 use crate::cas::{block_stream::BlockStream, range_request::parse_range_request, CasFS};
-use crate::metastore::BlockID;
+use crate::metastore::{BlockID, ObjectData};
 use crate::metrics::SharedMetrics;
 
 const MAX_KEYS: i32 = 1000;
@@ -156,8 +156,10 @@ impl S3 for S3FS {
             &key,
             size as u64,
             e_tag,
-            cnt as usize,
-            blocks
+            blocks,
+            ObjectData::MultiPart {
+                parts: cnt as usize
+            },
         ));
 
         // Try to delete the multipart metadata. If this fails, it is not really an issue.

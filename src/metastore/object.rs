@@ -11,24 +11,60 @@ use super::{BlockID, FsError, BLOCKID_SIZE, PTR_SIZE};
 
 #[derive(Debug)]
 pub struct Object {
+    object_type: ObjectType,
     size: u64,
     ctime: i64,
     e_tag: BlockID,
-    // The amount of parts uploaded for this object. In case of a simple put_object, this will be
-    // 0. In case of a multipart upload, this wil equal the amount of individual parts. This is
-    // required so we can properly construct the formatted hash later.
-    parts: usize,
     blocks: Vec<BlockID>,
+    data: ObjectData,
+}
+
+#[derive(Debug)]
+#[repr(u8)]
+pub enum ObjectType {
+    Single,
+    Multipart,
+    Inline,
+}
+
+impl ObjectType {
+    fn as_u8(&self) -> u8 {
+        match self {
+            ObjectType::Single => 0,
+            ObjectType::Multipart => 1,
+            ObjectType::Inline => 2,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ObjectData {
+    // The object is stored inline in the metadata.
+    Inline {
+        data: Vec<u8>,
+    },
+
+    // The object is a single part object, and the blocks are stored in the blocks field.
+    SinglePart,
+
+    // The object is a multipart object, and the blocks are stored in the blocks field.
+    MultiPart {
+        // The amount of parts uploaded for this object. In case of a simple put_object, this will be
+        // 0. In case of a multipart upload, this wil equal the amount of individual parts. This is
+        // required so we can properly construct the formatted hash later.
+        parts: usize,
+    },
 }
 
 impl Object {
-    pub fn new(size: u64, e_tag: BlockID, parts: usize, blocks: Vec<BlockID>) -> Self {
+    pub fn new(size: u64, e_tag: BlockID, blocks: Vec<BlockID>, object_data: ObjectData) -> Self {
         Self {
+            object_type: ObjectType::Single,
             size,
             ctime: Utc::now().timestamp(),
             e_tag,
-            parts,
             blocks,
+            data: object_data,
         }
     }
 
@@ -37,10 +73,11 @@ impl Object {
     }
 
     pub fn format_e_tag(&self) -> String {
-        if self.parts == 0 {
-            format!("\"{}\"", hex_string(&self.e_tag))
+        if let ObjectData::MultiPart { parts, .. } = &self.data {
+            format!("\"{}-{}\"", hex_string(&self.e_tag), parts)
         } else {
-            format!("\"{}-{}\"", hex_string(&self.e_tag), self.parts)
+            // Handle error case or provide default
+            format!("\"{}\"", hex_string(&self.e_tag))
         }
     }
 
@@ -50,10 +87,6 @@ impl Object {
 
     pub fn size(&self) -> u64 {
         self.size
-    }
-
-    pub fn parts(&self) -> usize {
-        self.parts
     }
 
     pub fn blocks(&self) -> &[BlockID] {
@@ -77,19 +110,32 @@ impl Object {
 
 impl From<&Object> for Vec<u8> {
     fn from(o: &Object) -> Self {
-        let mut data =
+        let mut raw_data =
             Vec::with_capacity(16 + BLOCKID_SIZE + PTR_SIZE * 2 + o.blocks.len() * BLOCKID_SIZE);
 
-        data.extend_from_slice(&o.size.to_le_bytes());
-        data.extend_from_slice(&o.ctime.to_le_bytes());
-        data.extend_from_slice(&o.e_tag);
-        data.extend_from_slice(&o.parts.to_le_bytes());
-        data.extend_from_slice(&o.blocks.len().to_le_bytes());
+        raw_data.extend_from_slice(&o.object_type.as_u8().to_le_bytes());
+        raw_data.extend_from_slice(&o.size.to_le_bytes());
+        raw_data.extend_from_slice(&o.ctime.to_le_bytes());
+        raw_data.extend_from_slice(&o.e_tag);
+        raw_data.extend_from_slice(&o.blocks.len().to_le_bytes());
         for block in &o.blocks {
-            data.extend_from_slice(block);
+            raw_data.extend_from_slice(block);
         }
 
-        data
+        match &o.data {
+            ObjectData::SinglePart => {
+                raw_data.extend_from_slice(&0u64.to_le_bytes());
+            }
+            ObjectData::MultiPart { parts } => {
+                raw_data.extend_from_slice(&parts.to_le_bytes());
+            }
+            ObjectData::Inline { data } => {
+                raw_data.extend_from_slice(&(data.len() as u64).to_le_bytes());
+                raw_data.extend_from_slice(data);
+            }
+        }
+
+        raw_data
     }
 }
 
@@ -101,32 +147,79 @@ impl TryFrom<&[u8]> for Object {
             return Err(FsError::MalformedObject);
         }
 
-        let block_len = usize::from_le_bytes(
-            value[16 + BLOCKID_SIZE + PTR_SIZE..16 + BLOCKID_SIZE + 2 * PTR_SIZE]
-                .try_into()
-                .unwrap(),
-        );
+        // object type: 1 byte
+        let mut start: usize = 0;
+        let mut end: usize = 1;
+        let object_type = u8::from_le_bytes(value[start..end].try_into().unwrap());
+        let object_type = match object_type {
+            0 => ObjectType::Single,
+            1 => ObjectType::Multipart,
+            2 => ObjectType::Inline,
+            _ => return Err(FsError::MalformedObject),
+        };
 
-        if value.len() != 16 + 2 * PTR_SIZE + BLOCKID_SIZE + block_len * BLOCKID_SIZE {
-            return Err(FsError::MalformedObject);
-        }
+        // size: 8 bytes
+        start += 1;
+        end += 8;
+        let size = u64::from_le_bytes(value[start..end].try_into().unwrap());
+
+        // ctime: 8bytes
+        start += 8;
+        end += 8;
+        let ctime = i64::from_le_bytes(value[start..end].try_into().unwrap());
+
+        // etag: BLOCKID_SIZE bytes
+        start += 8;
+        end += BLOCKID_SIZE;
+        let e_tag = value[start..end].try_into().unwrap();
+
+        // block_len : PTR_SIZE bytes
+        start += BLOCKID_SIZE;
+        end += PTR_SIZE;
+        let block_len = usize::from_le_bytes(value[start..end].try_into().unwrap());
+
+        //if value.len() != 16 + 2 * PTR_SIZE + BLOCKID_SIZE + block_len * BLOCKID_SIZE {
+        //    return Err(FsError::MalformedObject);
+        //}
 
         let mut blocks = Vec::with_capacity(block_len);
 
-        for chunk in value[16 + 2 * PTR_SIZE + BLOCKID_SIZE..].chunks_exact(BLOCKID_SIZE) {
+        // blocks: BLOCKID_SIZE * block_len bytes
+        start += PTR_SIZE;
+        end += BLOCKID_SIZE * block_len;
+        for chunk in value[start..end].chunks_exact(BLOCKID_SIZE) {
             blocks.push(chunk.try_into().unwrap());
         }
 
-        Ok(Object {
-            size: u64::from_le_bytes(value[0..8].try_into().unwrap()),
-            ctime: i64::from_le_bytes(value[8..16].try_into().unwrap()),
-            e_tag: value[16..16 + BLOCKID_SIZE].try_into().unwrap(),
-            parts: usize::from_le_bytes(
-                value[16 + BLOCKID_SIZE..16 + BLOCKID_SIZE + PTR_SIZE]
-                    .try_into()
-                    .unwrap(),
-            ),
+        let data = match object_type {
+            ObjectType::Single => ObjectData::SinglePart,
+            ObjectType::Multipart => {
+                // parts: PTR_SIZE bytes
+                start += BLOCKID_SIZE * block_len;
+                end += PTR_SIZE;
+                let parts = usize::from_le_bytes(value[start..end].try_into().unwrap());
+                ObjectData::MultiPart { parts }
+            }
+            ObjectType::Inline => {
+                // data_len: PTR_SIZE bytes
+                start += BLOCKID_SIZE * block_len;
+                end += PTR_SIZE;
+                let data_len = u64::from_le_bytes(value[start..end].try_into().unwrap());
+
+                // data: data_len bytes
+                start += PTR_SIZE;
+                end += data_len as usize;
+                let data = value[start..end].to_vec();
+                ObjectData::Inline { data }
+            }
+        };
+        Ok(Self {
+            object_type,
+            size,
+            ctime,
+            e_tag,
             blocks,
+            data,
         })
     }
 }

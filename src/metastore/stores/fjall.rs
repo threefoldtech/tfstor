@@ -458,6 +458,7 @@ impl BucketTreeExt for FjallTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metastore::ObjectData;
     use tempfile::tempdir;
 
     fn setup_store() -> (FjallStore, tempfile::TempDir) {
@@ -511,10 +512,10 @@ mod tests {
 
         // Test object insertion
         let test_obj = Object::new(
-            1024,                   // 1KB object
-            BlockID::from([1; 16]), // Sample ETag
-            0,
+            1024,                         // 1KB object
+            BlockID::from([1; 16]),       // Sample ETag
             vec![BlockID::from([1; 16])], // Sample block ID
+            ObjectData::SinglePart,
         );
         bucket.insert_meta(key, test_obj.to_vec()).unwrap();
 
@@ -563,8 +564,8 @@ mod tests {
             let obj = Object::new(
                 1024,
                 BlockID::from([1; 16]),
-                0,
                 vec![BlockID::from([1; 16])],
+                ObjectData::SinglePart,
             );
             bucket.insert_meta(key, obj.to_vec()).unwrap();
         }
@@ -621,8 +622,8 @@ mod tests {
             let obj = Object::new(
                 data.len() as u64,
                 BlockID::from([1; 16]),
-                0,
                 vec![BlockID::from([1; 16])],
+                ObjectData::SinglePart,
             );
             bucket.insert_meta(key, obj.to_vec()).unwrap();
         }
