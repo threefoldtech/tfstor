@@ -156,8 +156,8 @@ impl S3 for S3FS {
             &key,
             size as u64,
             e_tag,
-            blocks,
             ObjectData::MultiPart {
+                blocks,
                 parts: cnt as usize
             },
         ));
@@ -685,6 +685,10 @@ impl S3 for S3FS {
 
         let converted_stream = convert_stream_error(body);
         let byte_stream = ByteStream::new_with_size(converted_stream, content_length as usize);
+
+        // we only store the object here, no metadata
+        // the metadata will be stored when the multipart upload is completed
+        // the parts will be addressed by the bucket,key,upload_id, and part_number
         let (blocks, hash, size) = try_!(self.casfs.store_object(&bucket, &key, byte_stream).await);
 
         if size != content_length as u64 {

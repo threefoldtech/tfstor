@@ -512,10 +512,11 @@ mod tests {
 
         // Test object insertion
         let test_obj = Object::new(
-            1024,                         // 1KB object
-            BlockID::from([1; 16]),       // Sample ETag
-            vec![BlockID::from([1; 16])], // Sample block ID
-            ObjectData::SinglePart,
+            1024,                   // 1KB object
+            BlockID::from([1; 16]), // Sample ETag
+            ObjectData::SinglePart {
+                blocks: vec![BlockID::from([1; 16])],
+            },
         );
         bucket.insert_meta(key, test_obj.to_vec()).unwrap();
 
@@ -564,8 +565,9 @@ mod tests {
             let obj = Object::new(
                 1024,
                 BlockID::from([1; 16]),
-                vec![BlockID::from([1; 16])],
-                ObjectData::SinglePart,
+                ObjectData::SinglePart {
+                    blocks: vec![BlockID::from([1; 16])],
+                },
             );
             bucket.insert_meta(key, obj.to_vec()).unwrap();
         }
@@ -622,8 +624,9 @@ mod tests {
             let obj = Object::new(
                 data.len() as u64,
                 BlockID::from([1; 16]),
-                vec![BlockID::from([1; 16])],
-                ObjectData::SinglePart,
+                ObjectData::SinglePart {
+                    blocks: vec![BlockID::from([1; 16])],
+                },
             );
             bucket.insert_meta(key, obj.to_vec()).unwrap();
         }

@@ -131,10 +131,9 @@ impl CasFS {
         key: &str,
         size: u64,
         e_tag: BlockID,
-        blocks: Vec<BlockID>,
         object_data: ObjectData,
     ) -> Result<Object, MetaError> {
-        let obj_meta = Object::new(size, e_tag, blocks, object_data);
+        let obj_meta = Object::new(size, e_tag, object_data);
         let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
         bucket.insert_meta(key, obj_meta.to_vec())?;
         Ok(obj_meta)
@@ -281,8 +280,9 @@ impl CasFS {
                 key,
                 size,
                 content_hash,
-                blocks.clone(),
-                ObjectData::SinglePart,
+                ObjectData::SinglePart {
+                    blocks: blocks.clone(),
+                },
             )
             .unwrap();
         Ok((obj, blocks, content_hash, size))
