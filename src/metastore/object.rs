@@ -9,6 +9,7 @@ use faster_hex::hex_string;
 
 use super::{BlockID, FsError, BLOCKID_SIZE, PTR_SIZE};
 
+/// Represents an object in the storage system with its metadata and content (for Inline objects).
 #[derive(Debug)]
 pub struct Object {
     object_type: ObjectType,
@@ -33,14 +34,13 @@ pub enum ObjectData {
     // The object is a multipart object, and the blocks are stored in the blocks field.
     MultiPart {
         blocks: Vec<BlockID>,
-        // The amount of parts uploaded for this object. In case of a simple put_object, this will be
-        // 0. In case of a multipart upload, this wil equal the amount of individual parts. This is
+        // The amount of parts uploaded for this object. This wil equal the amount of individual parts. This is
         // required so we can properly construct the formatted hash later.
         parts: usize,
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 #[repr(u8)]
 pub enum ObjectType {
     Single = 0,
@@ -125,7 +125,7 @@ impl Object {
         let mandatory_fields_size = 17 + BLOCKID_SIZE;
         match &self.data {
             ObjectData::SinglePart { blocks } => {
-                mandatory_fields_size + (blocks.len() * BLOCKID_SIZE)
+                mandatory_fields_size + PTR_SIZE + (blocks.len() * BLOCKID_SIZE)
             }
             ObjectData::MultiPart { blocks, .. } => {
                 mandatory_fields_size + PTR_SIZE + (blocks.len() * BLOCKID_SIZE) + PTR_SIZE
@@ -169,11 +169,15 @@ impl From<&Object> for Vec<u8> {
     }
 }
 
+fn minimum_raw_object_size() -> usize {
+    17 + BLOCKID_SIZE + PTR_SIZE
+}
+
 impl TryFrom<&[u8]> for Object {
     type Error = FsError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() < 16 + BLOCKID_SIZE + 2 * PTR_SIZE {
+        if value.len() < minimum_raw_object_size() {
             return Err(FsError::MalformedObject);
         }
 
@@ -257,5 +261,131 @@ impl TryFrom<&[u8]> for Object {
             e_tag,
             data,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_objects() -> Vec<(ObjectType, Object)> {
+        vec![
+            (
+                ObjectType::Single,
+                Object::new(
+                    1024,
+                    [1; BLOCKID_SIZE],
+                    ObjectData::SinglePart {
+                        blocks: vec![[2; BLOCKID_SIZE], [3; BLOCKID_SIZE]],
+                    },
+                ),
+            ),
+            (
+                ObjectType::Multipart,
+                Object::new(
+                    2048,
+                    [4; BLOCKID_SIZE],
+                    ObjectData::MultiPart {
+                        blocks: vec![[5; BLOCKID_SIZE], [6; BLOCKID_SIZE]],
+                        parts: 2,
+                    },
+                ),
+            ),
+            (
+                ObjectType::Inline,
+                Object::new(
+                    5,
+                    [7; BLOCKID_SIZE],
+                    ObjectData::Inline {
+                        data: vec![1, 2, 3, 4, 5],
+                    },
+                ),
+            ),
+        ]
+    }
+
+    #[test]
+    fn test_object_serialization() {
+        for (expected_type, obj) in create_test_objects() {
+            let serialized: Vec<u8> = (&obj).into();
+            assert!(serialized.len() >= minimum_raw_object_size());
+            assert_eq!(serialized[0], expected_type as u8);
+        }
+    }
+
+    #[test]
+    fn test_object_deserialization() {
+        for (expected_type, obj) in create_test_objects() {
+            let serialized: Vec<u8> = (&obj).into();
+            let deserialized = Object::try_from(serialized.as_slice()).unwrap();
+
+            assert_eq!(deserialized.object_type, expected_type);
+            assert_eq!(deserialized.size, obj.size);
+            assert_eq!(deserialized.ctime, obj.ctime);
+            assert_eq!(deserialized.e_tag, obj.e_tag);
+
+            match (obj.data, deserialized.data) {
+                (ObjectData::SinglePart { blocks: b1 }, ObjectData::SinglePart { blocks: b2 }) => {
+                    assert_eq!(b1, b2);
+                }
+                (
+                    ObjectData::MultiPart {
+                        blocks: b1,
+                        parts: p1,
+                    },
+                    ObjectData::MultiPart {
+                        blocks: b2,
+                        parts: p2,
+                    },
+                ) => {
+                    assert_eq!(b1, b2);
+                    assert_eq!(p1, p2);
+                }
+                (ObjectData::Inline { data: d1 }, ObjectData::Inline { data: d2 }) => {
+                    assert_eq!(d1, d2);
+                }
+                _ => panic!("Object type mismatch after deserialization"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_malformed_input() {
+        // Test too short input
+        assert!(matches!(
+            Object::try_from(&[0u8; 15][..]),
+            Err(FsError::MalformedObject)
+        ));
+
+        // Test invalid object type
+        let mut bad_type = Vec::from(&create_test_objects()[0].1);
+        bad_type[0] = 255;
+        assert!(matches!(
+            Object::try_from(bad_type.as_slice()),
+            Err(FsError::MalformedObject)
+        ));
+
+        // Test incorrect length for blocks
+        let mut bad_blocks = Vec::from(&create_test_objects()[0].1);
+        bad_blocks.truncate(bad_blocks.len() - 1);
+        assert!(matches!(
+            Object::try_from(bad_blocks.as_slice()),
+            Err(FsError::MalformedObject)
+        ));
+    }
+
+    #[test]
+    fn test_size_calculation() {
+        for (_, obj) in create_test_objects() {
+            let serialized: Vec<u8> = (&obj).into();
+            assert_eq!(
+                serialized.len(),
+                obj.num_bytes(),
+                "Size mismatch for {:?} object: expected {}, got {}",
+                obj.object_type,
+                obj.num_bytes(),
+                serialized.len()
+            );
+        }
     }
 }
