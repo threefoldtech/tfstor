@@ -526,6 +526,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_store_inlined_object() {
+        // Setup
+        let (fs, _dir) = setup_test_fs();
+        let bucket_name = "test_bucket";
+        let key = "test_key1";
+        fs.create_bucket(bucket_name).unwrap();
+
+        let small_data = b"small test data".to_vec();
+        let obj_meta = fs
+            .store_inlined_object(bucket_name, key, small_data.clone())
+            .unwrap();
+
+        // Verify inlined data
+        assert_eq!(obj_meta.size(), small_data.len() as u64);
+        assert_eq!(obj_meta.inlined().unwrap(), &small_data);
+    }
+
+    #[tokio::test]
     async fn test_store_object_refcount() {
         // Setup
         let (fs, _dir) = setup_test_fs();
