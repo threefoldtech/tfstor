@@ -15,7 +15,7 @@ pub struct Object {
     object_type: ObjectType,
     size: u64,
     ctime: i64,
-    e_tag: BlockID,
+    hash: BlockID,
     data: ObjectData,
 }
 
@@ -59,7 +59,7 @@ impl ObjectType {
 }
 
 impl Object {
-    pub fn new(size: u64, e_tag: BlockID, object_data: ObjectData) -> Self {
+    pub fn new(size: u64, hash: BlockID, object_data: ObjectData) -> Self {
         let object_type = match &object_data {
             ObjectData::SinglePart { .. } => ObjectType::Single,
             ObjectData::MultiPart { .. } => ObjectType::Multipart,
@@ -69,7 +69,7 @@ impl Object {
             object_type,
             size,
             ctime: Utc::now().timestamp(),
-            e_tag,
+            hash,
             data: object_data,
         }
     }
@@ -84,11 +84,15 @@ impl Object {
 
     pub fn format_e_tag(&self) -> String {
         if let ObjectData::MultiPart { parts, .. } = &self.data {
-            format!("\"{}-{}\"", hex_string(&self.e_tag), parts)
+            format!("\"{}-{}\"", hex_string(&self.hash), parts)
         } else {
             // Handle error case or provide default
-            format!("\"{}\"", hex_string(&self.e_tag))
+            format!("\"{}\"", hex_string(&self.hash))
         }
+    }
+
+    pub fn hash(&self) -> &BlockID {
+        &self.hash
     }
 
     pub fn touch(&mut self) {
@@ -155,7 +159,7 @@ impl From<&Object> for Vec<u8> {
         raw_data.extend_from_slice(&o.object_type.as_u8().to_le_bytes());
         raw_data.extend_from_slice(&o.size.to_le_bytes());
         raw_data.extend_from_slice(&o.ctime.to_le_bytes());
-        raw_data.extend_from_slice(&o.e_tag);
+        raw_data.extend_from_slice(&o.hash);
 
         // Write variant-specific data
         match &o.data {
@@ -270,7 +274,7 @@ impl TryFrom<&[u8]> for Object {
             object_type,
             size,
             ctime,
-            e_tag,
+            hash: e_tag,
             data,
         })
     }
@@ -334,7 +338,7 @@ mod tests {
             assert_eq!(deserialized.object_type, expected_type);
             assert_eq!(deserialized.size, obj.size);
             assert_eq!(deserialized.ctime, obj.ctime);
-            assert_eq!(deserialized.e_tag, obj.e_tag);
+            assert_eq!(deserialized.hash, obj.hash);
 
             match (obj.data, deserialized.data) {
                 (ObjectData::SinglePart { blocks: b1 }, ObjectData::SinglePart { blocks: b2 }) => {

@@ -59,46 +59,58 @@ macro_rules! log_and_unwrap {
     };
 }
 
-fn config() -> &'static SdkConfig {
-    static CONFIG: Lazy<SdkConfig> = Lazy::new(|| {
-        setup_tracing();
+use std::sync::Mutex as StdMutex;
 
-        // Fake credentials
-        let cred = Credentials::for_tests();
+// Create a static CONFIG_SIZE to store the inlined size
+static CONFIG_SIZE: StdMutex<Option<usize>> = StdMutex::new(None);
 
-        let metrics = s3_cas::metrics::SharedMetrics::new();
-        let storage_engine = s3_cas::cas::StorageEngine::Fjall;
-        let casfs = s3_cas::cas::CasFS::new(
-            FS_ROOT.into(),
-            FS_ROOT.into(),
-            metrics.clone(),
-            storage_engine,
-            Some(1),
-        );
-        let s3fs = s3_cas::s3fs::S3FS::new(FS_ROOT.into(), FS_ROOT.into(), casfs, metrics.clone());
+static CONFIG: Lazy<SdkConfig> = Lazy::new(|| {
+    setup_tracing();
 
-        // Setup S3 service
-        let service = {
-            let mut b = S3ServiceBuilder::new(s3fs);
-            b.set_auth(s3s::auth::SimpleAuth::from_single(
-                cred.access_key_id(),
-                cred.secret_access_key(),
-            ));
-            b.set_host(SingleDomain::new(DOMAIN_NAME).unwrap());
-            b.build()
-        };
+    // Fake credentials
+    let cred = Credentials::for_tests();
 
-        // Convert to aws http client
-        let client = s3s_aws::Client::from(service.into_shared());
+    let metrics = s3_cas::metrics::SharedMetrics::new();
+    let storage_engine = s3_cas::cas::StorageEngine::Fjall;
+    let casfs = s3_cas::cas::CasFS::new(
+        FS_ROOT.into(),
+        FS_ROOT.into(),
+        metrics.clone(),
+        storage_engine,
+        Some(1),
+    );
+    let s3fs = s3_cas::s3fs::S3FS::new(FS_ROOT.into(), FS_ROOT.into(), casfs, metrics.clone());
 
-        // Setup aws sdk config
-        SdkConfig::builder()
-            .credentials_provider(SharedCredentialsProvider::new(cred))
-            .http_client(client)
-            .region(Region::new(REGION))
-            .endpoint_url(format!("http://{DOMAIN_NAME}"))
-            .build()
-    });
+    // Setup S3 service
+    let service = {
+        let mut b = S3ServiceBuilder::new(s3fs);
+        b.set_auth(s3s::auth::SimpleAuth::from_single(
+            cred.access_key_id(),
+            cred.secret_access_key(),
+        ));
+        b.set_host(SingleDomain::new(DOMAIN_NAME).unwrap());
+        b.build()
+    };
+
+    // Convert to aws http client
+    let client = s3s_aws::Client::from(service.into_shared());
+
+    // Setup aws sdk config
+    SdkConfig::builder()
+        .credentials_provider(SharedCredentialsProvider::new(cred))
+        .http_client(client)
+        .region(Region::new(REGION))
+        .endpoint_url(format!("http://{DOMAIN_NAME}"))
+        .build()
+});
+
+fn setup_test() -> &'static SdkConfig {
+    setup_test_with_inlined_size(Some(1))
+}
+
+fn setup_test_with_inlined_size(inlined_metadata_size: Option<usize>) -> &'static SdkConfig {
+    // Set the inlined size before accessing CONFIG
+    *CONFIG_SIZE.lock().unwrap() = inlined_metadata_size;
     &CONFIG
 }
 
@@ -126,9 +138,21 @@ async fn create_bucket(c: &Client, bucket: &str) -> Result<()> {
 #[tokio::test]
 #[tracing::instrument]
 async fn test_put_delete_object() -> Result<()> {
+    let test_cases = [
+        Some(1),        // Small inline size, the object will never be inlined
+        Some(10240000), // Very Large inline size, the object will always be inlined
+    ];
+
+    for size in test_cases {
+        do_test_put_delete_object(size).await?;
+    }
+    Ok(())
+}
+
+async fn do_test_put_delete_object(inlined_metadata_size: Option<usize>) -> Result<()> {
     let _guard = serial().await;
 
-    let c = Client::new(config());
+    let c = Client::new(setup_test_with_inlined_size(inlined_metadata_size));
     let bucket = format!("test-single-object-{}", Uuid::new_v4());
     let bucket = bucket.as_str();
     let key = "sample.txt";
@@ -211,7 +235,7 @@ async fn test_put_delete_object() -> Result<()> {
 #[tokio::test]
 #[tracing::instrument]
 async fn test_list_buckets() -> Result<()> {
-    let c = Client::new(config());
+    let c = Client::new(setup_test());
     let response1 = log_and_unwrap!(c.list_buckets().send().await);
     drop(response1);
 
@@ -238,7 +262,7 @@ async fn test_list_buckets() -> Result<()> {
 #[tokio::test]
 #[tracing::instrument]
 async fn test_list_objects_v2() -> Result<()> {
-    let c = Client::new(config());
+    let c = Client::new(setup_test());
     let bucket = format!("test-list-objects-v2-{}", Uuid::new_v4());
     let bucket_str = bucket.as_str();
     create_bucket(&c, bucket_str).await?;
@@ -319,7 +343,7 @@ async fn test_list_objects_v2_startafter() -> Result<()> {
 
     log::error!("Starting test_list_objects_v2_startafter");
 
-    let c = Client::new(config());
+    let c = Client::new(setup_test());
     let bucket = format!("test-list-{}", Uuid::new_v4());
     let bucket_str = bucket.as_str();
     create_bucket(&c, bucket_str).await?;
@@ -436,7 +460,7 @@ async fn test_list_objects_v2_startafter() -> Result<()> {
 async fn test_multipart() -> Result<()> {
     let _guard = serial().await;
 
-    let c = Client::new(config());
+    let c = Client::new(setup_test());
 
     let bucket = format!("test-multipart-{}", Uuid::new_v4());
     let bucket = bucket.as_str();

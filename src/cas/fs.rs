@@ -135,10 +135,10 @@ impl CasFS {
         bucket_name: &str,
         key: &str,
         size: u64,
-        e_tag: BlockID,
+        hash: BlockID,
         object_data: ObjectData,
     ) -> Result<Object, MetaError> {
-        let obj_meta = Object::new(size, e_tag, object_data);
+        let obj_meta = Object::new(size, hash, object_data);
         let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
         bucket.insert_meta(key, obj_meta.to_vec())?;
         Ok(obj_meta)
@@ -242,24 +242,6 @@ impl CasFS {
         self.meta_store.list_buckets()
     }
 
-    pub fn store_inlined_object(
-        &self,
-        bucket_name: &str,
-        key: &str,
-        data: Vec<u8>,
-    ) -> Result<Object, MetaError> {
-        let content_hash = Md5::digest(&data).into();
-        let size = data.len() as u64;
-        let obj = self.create_object_meta(
-            bucket_name,
-            key,
-            size,
-            content_hash,
-            ObjectData::Inline { data },
-        )?;
-        Ok(obj)
-    }
-
     /// Delete an object from a bucket.
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), MetaError> {
         let path_map = self.path_tree()?;
@@ -290,12 +272,12 @@ impl CasFS {
     }
 
     // convenient function to store an object to disk and then store it's metada
-    pub async fn store_object_and_meta(
+    pub async fn store_single_object_and_meta(
         &self,
         bucket_name: &str,
         key: &str,
         data: ByteStream,
-    ) -> io::Result<(Object, Vec<BlockID>, BlockID, u64)> {
+    ) -> io::Result<Object> {
         let (blocks, content_hash, size) = self.store_object(bucket_name, key, data).await?;
         let obj = self
             .create_object_meta(
@@ -303,12 +285,10 @@ impl CasFS {
                 key,
                 size,
                 content_hash,
-                ObjectData::SinglePart {
-                    blocks: blocks.clone(),
-                },
+                ObjectData::SinglePart { blocks },
             )
             .unwrap();
-        Ok((obj, blocks, content_hash, size))
+        Ok(obj)
     }
 
     /// Save the stream of bytes to disk.
@@ -439,6 +419,25 @@ impl CasFS {
             size,
         ))
     }
+
+    // Store an object inlined in the metadata.
+    pub fn store_inlined_object(
+        &self,
+        bucket_name: &str,
+        key: &str,
+        data: Vec<u8>,
+    ) -> Result<Object, MetaError> {
+        let content_hash = Md5::digest(&data).into();
+        let size = data.len() as u64;
+        let obj = self.create_object_meta(
+            bucket_name,
+            key,
+            size,
+            content_hash,
+            ObjectData::Inline { data },
+        )?;
+        Ok(obj)
+    }
 }
 
 #[cfg(test)]
@@ -485,18 +484,18 @@ mod tests {
         ));
 
         // Store object
-        let (_, block_ids, _, size) = fs
-            .store_object_and_meta(bucket_name, key1, stream)
+        let obj = fs
+            .store_single_object_and_meta(bucket_name, key1, stream)
             .await
             .unwrap();
 
         // Verify results
-        assert_eq!(size, test_data_len as u64);
-        assert_eq!(block_ids.len(), 1);
+        assert_eq!(obj.size(), test_data_len as u64);
+        assert_eq!(obj.blocks().len(), 1);
 
         // Verify block & path was stored
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        let stored_block = block_tree.get_block(&block_ids[0]).unwrap().unwrap();
+        let stored_block = block_tree.get_block(&obj.blocks()[0]).unwrap().unwrap();
         assert_eq!(stored_block.size(), test_data_len);
         assert_eq!(stored_block.rc(), 1);
         assert_eq!(
@@ -515,14 +514,14 @@ mod tests {
             async move { Ok(Bytes::from(test_data_2.clone())) },
         ));
 
-        let (_, new_blocks, _, _) = fs
-            .store_object_and_meta(bucket_name, key2, stream)
+        let new_obj = fs
+            .store_single_object_and_meta(bucket_name, key2, stream)
             .await
             .unwrap();
 
-        assert_eq!(new_blocks, block_ids);
+        assert_eq!(new_obj.blocks(), obj.blocks());
 
-        let stored_block = block_tree.get_block(&new_blocks[0]).unwrap().unwrap();
+        let stored_block = block_tree.get_block(&new_obj.blocks()[0]).unwrap().unwrap();
         assert_eq!(stored_block.rc(), 2);
     }
 
@@ -545,14 +544,14 @@ mod tests {
         ));
 
         // Store object
-        let (_, block_ids, _, _) = fs
-            .store_object_and_meta(bucket_name, key1, stream)
+        let obj = fs
+            .store_single_object_and_meta(bucket_name, key1, stream)
             .await
             .unwrap();
 
         // Initial refcount must be 1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        let stored_block = block_tree.get_block(&block_ids[0]).unwrap().unwrap();
+        let stored_block = block_tree.get_block(&obj.blocks()[0]).unwrap().unwrap();
         assert_eq!(stored_block.rc(), 1);
 
         {
@@ -564,14 +563,14 @@ mod tests {
                     async move { Ok(Bytes::from(test_data_2.clone())) },
                 ));
 
-            let (_, new_blocks, _, _) = fs
-                .store_object_and_meta(bucket_name, key1, stream)
+            let new_obj = fs
+                .store_single_object_and_meta(bucket_name, key1, stream)
                 .await
                 .unwrap();
 
-            assert_eq!(new_blocks, block_ids);
+            assert_eq!(new_obj.blocks(), obj.blocks());
 
-            let stored_block = block_tree.get_block(&new_blocks[0]).unwrap().unwrap();
+            let stored_block = block_tree.get_block(&new_obj.blocks()[0]).unwrap().unwrap();
             assert_eq!(stored_block.rc(), 1);
         }
         {
@@ -582,14 +581,14 @@ mod tests {
                     async move { Ok(Bytes::from(test_data_3.clone())) },
                 ));
 
-            let (_, new_blocks, _, _) = fs
-                .store_object_and_meta(bucket_name, key2, stream)
+            let new_obj = fs
+                .store_single_object_and_meta(bucket_name, key2, stream)
                 .await
                 .unwrap();
 
-            assert_eq!(new_blocks, block_ids);
+            assert_eq!(new_obj.blocks(), obj.blocks());
 
-            let stored_block = block_tree.get_block(&new_blocks[0]).unwrap().unwrap();
+            let stored_block = block_tree.get_block(&new_obj.blocks()[0]).unwrap().unwrap();
             assert_eq!(stored_block.rc(), 2);
         }
     }
@@ -613,8 +612,8 @@ mod tests {
         ));
 
         // Store object
-        let (_, block_ids, _, _) = fs
-            .store_object_and_meta(bucket_name, key, stream)
+        let obj = fs
+            .store_single_object_and_meta(bucket_name, key, stream)
             .await
             .unwrap();
 
@@ -625,8 +624,8 @@ mod tests {
         // verify blocks and path exist
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         let mut stored_paths = Vec::new();
-        for id in block_ids.clone() {
-            let block = block_tree.get_block(&id).unwrap().unwrap();
+        for id in obj.blocks() {
+            let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(
                 fs.path_tree().unwrap().contains_key(block.path()).unwrap(),
                 true
@@ -643,8 +642,8 @@ mod tests {
 
         // Verify blocks were cleaned up
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        for id in block_ids {
-            assert!(block_tree.get_block(&id).unwrap().is_none());
+        for id in obj.blocks() {
+            assert!(block_tree.get_block(id).unwrap().is_none());
         }
         // Verify paths were cleaned up
         for path in stored_paths {
@@ -679,13 +678,13 @@ mod tests {
         ));
 
         // Store first object
-        let (_, block_ids1, content_hash1, _) = fs
-            .store_object_and_meta(bucket, key1, stream1)
+        let obj1 = fs
+            .store_single_object_and_meta(bucket, key1, stream1)
             .await
             .unwrap();
         // Verify blocks  exist with rc=1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        for id in &block_ids1 {
+        for id in obj1.blocks() {
             let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
@@ -696,17 +695,17 @@ mod tests {
             async move { Ok(Bytes::from(test_data2.clone())) },
         ));
 
-        let (_, block_ids2, content_hash2, _) = fs
-            .store_object_and_meta(bucket, key2, stream2)
+        let obj2 = fs
+            .store_single_object_and_meta(bucket, key2, stream2)
             .await
             .unwrap();
 
         // Verify both objects share same blocks
-        assert_eq!(block_ids1, block_ids2);
-        assert_eq!(content_hash1, content_hash2);
+        assert_eq!(obj1.blocks(), obj2.blocks());
+        assert_eq!(obj1.hash(), obj2.hash());
         // Verify blocks  exist with rc=2
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        for id in &block_ids2 {
+        for id in obj2.blocks() {
             let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 2);
         }
@@ -716,7 +715,7 @@ mod tests {
 
         // Verify blocks still exist
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        for id in &block_ids1 {
+        for id in obj1.blocks() {
             let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
@@ -725,8 +724,8 @@ mod tests {
         fs.delete_object(bucket, key2).await.unwrap();
 
         // Verify blocks are gone
-        for id in block_ids1 {
-            assert!(block_tree.get_block(&id).unwrap().is_none());
+        for id in obj1.blocks() {
+            assert!(block_tree.get_block(id).unwrap().is_none());
         }
     }
 
@@ -754,13 +753,13 @@ mod tests {
         ));
 
         // Store first object
-        let (_, block_ids1, content_hash1, _) = fs
-            .store_object_and_meta(bucket, key1, stream1)
+        let obj1 = fs
+            .store_single_object_and_meta(bucket, key1, stream1)
             .await
             .unwrap();
         // Verify blocks  exist with rc=1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        for id in &block_ids1 {
+        for id in obj1.blocks() {
             let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
@@ -771,17 +770,17 @@ mod tests {
             async move { Ok(Bytes::from(test_data2.clone())) },
         ));
 
-        let (_, block_ids2, content_hash2, _) = fs
-            .store_object_and_meta(bucket, key1, stream2)
+        let obj2 = fs
+            .store_single_object_and_meta(bucket, key1, stream2)
             .await
             .unwrap();
 
         // Verify both objects share same blocks
-        assert_eq!(block_ids1, block_ids2);
-        assert_eq!(content_hash1, content_hash2);
+        assert_eq!(obj1.blocks(), obj2.blocks());
+        assert_eq!(obj1.hash(), obj2.hash());
         // Verify blocks  exist with rc=2
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        for id in &block_ids2 {
+        for id in obj2.blocks() {
             let block = block_tree.get_block(id).unwrap().unwrap();
             assert_eq!(block.rc(), 1);
         }
@@ -790,8 +789,8 @@ mod tests {
         fs.delete_object(bucket, key1).await.unwrap();
 
         // Verify blocks are gone
-        for id in block_ids1 {
-            assert!(block_tree.get_block(&id).unwrap().is_none());
+        for id in obj1.blocks() {
+            assert!(block_tree.get_block(id).unwrap().is_none());
         }
     }
 }

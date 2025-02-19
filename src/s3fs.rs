@@ -66,7 +66,7 @@ impl S3FS {
 
     // Compute the e_tag of the multpart upload. Per the S3 standard (according to minio), the
     // e_tag of a multipart uploaded object is the Md5 of the Md5 of the parts.
-    fn calculate_multipart_etag(&self, blocks: &[BlockID]) -> io::Result<([u8; 16], usize)> {
+    fn calculate_multipart_hash(&self, blocks: &[BlockID]) -> io::Result<([u8; 16], usize)> {
         let mut hasher = Md5::new();
         let mut size = 0;
         let block_map = self.casfs.block_tree()?;
@@ -149,13 +149,13 @@ impl S3 for S3FS {
             blocks.extend_from_slice(mp.blocks());
         }
 
-        let (e_tag, size) = try_!(self.calculate_multipart_etag(&blocks));
+        let (content_hash, size) = try_!(self.calculate_multipart_hash(&blocks));
 
         let object_meta = try_!(self.casfs.create_object_meta(
             &bucket,
             &key,
             size as u64,
-            e_tag,
+            content_hash,
             ObjectData::MultiPart {
                 blocks,
                 parts: cnt as usize
@@ -664,6 +664,8 @@ impl S3 for S3FS {
             use futures::TryStreamExt;
             if content_length <= self.casfs.max_inlined_data_length() as i64 {
                 // Collect stream into Vec<u8>
+                // it is safe to collect the stream into memory as the content length is
+                // considered small
                 let data: Vec<u8> = body
                     .try_collect::<Vec<_>>()
                     .await
@@ -685,9 +687,9 @@ impl S3 for S3FS {
         let converted_stream = convert_stream_error(body);
         let byte_stream =
             ByteStream::new_with_size(converted_stream, content_length.unwrap() as usize);
-        let (obj_meta, _, _, _) = try_!(
+        let obj_meta = try_!(
             self.casfs
-                .store_object_and_meta(&bucket, &key, byte_stream)
+                .store_single_object_and_meta(&bucket, &key, byte_stream)
                 .await
         );
 
