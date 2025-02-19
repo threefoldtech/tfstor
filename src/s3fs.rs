@@ -358,7 +358,25 @@ impl S3 for S3FS {
             }
         };
 
-        let e_tag = obj_meta.format_e_tag();
+        // if the object is inlined, we return it directly
+        if let Some(data) = obj_meta.inlined() {
+            let bytes = bytes::Bytes::from(data.clone());
+
+            let body = s3s::Body::from(bytes);
+            let stream = StreamingBlob::from(body);
+
+            let stream_size = data.len() as u64;
+            let output = GetObjectOutput {
+                body: Some(stream),
+                content_length: Some(stream_size as i64),
+                content_range: Some(fmt_content_range(0, stream_size - 1, stream_size)),
+                last_modified: Some(Timestamp::from(obj_meta.last_modified())),
+                e_tag: Some(obj_meta.format_e_tag()),
+                ..Default::default()
+            };
+            return Ok(S3Response::new(output));
+        }
+
         let stream_size = obj_meta.size();
         let range = match range {
             Some(range) => {
@@ -404,7 +422,7 @@ impl S3 for S3FS {
             content_range: Some(fmt_content_range(0, stream_size - 1, stream_size)),
             last_modified: Some(Timestamp::from(obj_meta.last_modified())),
             //metadata: object_metadata,
-            e_tag: Some(e_tag),
+            e_tag: Some(obj_meta.format_e_tag()),
             ..Default::default()
         };
         Ok(S3Response::new(output))
@@ -640,7 +658,30 @@ impl S3 for S3FS {
             return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
         }
 
-        // save the data
+        // if the content length is less than the max inlined data length, we store the object in the
+        // metadata store, otherwise we store it in the cas layer.
+        if let Some(content_length) = content_length {
+            use futures::TryStreamExt;
+            if content_length <= self.casfs.max_inlined_data_length() as i64 {
+                // Collect stream into Vec<u8>
+                let data: Vec<u8> = body
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .map_err(|e| s3_error!(InternalError, "Failed to read body: {}", e))?
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                let obj_meta = try_!(self.casfs.store_inlined_object(&bucket, &key, data));
+
+                let output = PutObjectOutput {
+                    e_tag: Some(obj_meta.format_e_tag()),
+                    ..Default::default()
+                };
+                return Ok(S3Response::new(output));
+            }
+        }
+
+        // save the datadata
         let converted_stream = convert_stream_error(body);
         let byte_stream =
             ByteStream::new_with_size(converted_stream, content_length.unwrap() as usize);
@@ -686,9 +727,10 @@ impl S3 for S3FS {
         let converted_stream = convert_stream_error(body);
         let byte_stream = ByteStream::new_with_size(converted_stream, content_length as usize);
 
-        // we only store the object here, no metadata
-        // the metadata will be stored when the multipart upload is completed
-        // the parts will be addressed by the bucket,key,upload_id, and part_number
+        // we only store the object here, metadata is not stored in the meta store.
+        // it is stored in the multipart metadata, in the `cas` layer.
+        // the multipart metadata will be deleted when the multipart upload is completed
+        // and replaced with the object metadata in metastore in the `complete_multipart_upload` function.
         let (blocks, hash, size) = try_!(self.casfs.store_object(&bucket, &key, byte_stream).await);
 
         if size != content_length as u64 {

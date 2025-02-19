@@ -15,6 +15,7 @@ pub struct FjallStore {
     bucket_partition: Arc<fjall::TxPartitionHandle>,
     block_partition: Arc<fjall::TxPartitionHandle>,
     path_partition: Arc<fjall::TxPartitionHandle>,
+    inlined_metadata_size: usize,
 }
 
 impl std::fmt::Debug for FjallStore {
@@ -25,8 +26,10 @@ impl std::fmt::Debug for FjallStore {
     }
 }
 
+const DEFAULT_INLINED_METADATA_SIZE: usize = 1024;
+
 impl FjallStore {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, inlined_metadata_size: Option<usize>) -> Self {
         eprintln!("Opening fjall store at {:?}", path);
         const BUCKET_META_PARTITION: &str = "_BUCKETS";
         const BLOCK_PARTITION: &str = "_BLOCKS";
@@ -42,11 +45,13 @@ impl FjallStore {
         let path_partition = tx_keyspace
             .open_partition(PATH_PARTITION, Default::default())
             .unwrap();
+        let inlined_metadata_size = inlined_metadata_size.unwrap_or(DEFAULT_INLINED_METADATA_SIZE);
         Self {
             keyspace: Arc::new(tx_keyspace),
             bucket_partition: Arc::new(bucket_partition),
             block_partition: Arc::new(block_partition),
             path_partition: Arc::new(path_partition),
+            inlined_metadata_size,
         }
     }
 
@@ -69,6 +74,13 @@ impl FjallStore {
 }
 
 impl MetaStore for FjallStore {
+    fn max_inlined_data_length(&self) -> usize {
+        if self.inlined_metadata_size < Object::minimum_inline_metadata_size() {
+            return 0;
+        }
+        self.inlined_metadata_size - Object::minimum_inline_metadata_size()
+    }
+
     fn get_bucket_ext(
         &self,
         name: &str,
@@ -462,7 +474,7 @@ mod tests {
 
     fn setup_store() -> (FjallStore, tempfile::TempDir) {
         let dir = tempdir().unwrap();
-        let store = FjallStore::new(dir.path().to_path_buf());
+        let store = FjallStore::new(dir.path().to_path_buf(), Some(1));
         (store, dir)
     }
 

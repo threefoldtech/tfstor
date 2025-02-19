@@ -83,11 +83,12 @@ impl CasFS {
         mut meta_path: PathBuf,
         metrics: SharedMetrics,
         storage_engine: StorageEngine,
+        inlined_metadata_size: Option<usize>,
     ) -> Self {
         meta_path.push("db");
         root.push("blocks");
         let meta_store: Box<dyn MetaStore> = match storage_engine {
-            StorageEngine::Fjall => Box::new(FjallStore::new(meta_path)),
+            StorageEngine::Fjall => Box::new(FjallStore::new(meta_path, inlined_metadata_size)),
         };
 
         // Get the current amount of buckets
@@ -105,6 +106,10 @@ impl CasFS {
 
     fn path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         self.meta_store.get_path_tree()
+    }
+
+    pub fn max_inlined_data_length(&self) -> usize {
+        self.meta_store.max_inlined_data_length()
     }
 
     pub fn get_bucket(
@@ -235,6 +240,24 @@ impl CasFS {
     /// Get a list of all buckets in the system.
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         self.meta_store.list_buckets()
+    }
+
+    pub fn store_inlined_object(
+        &self,
+        bucket_name: &str,
+        key: &str,
+        data: Vec<u8>,
+    ) -> Result<Object, MetaError> {
+        let content_hash = Md5::digest(&data).into();
+        let size = data.len() as u64;
+        let obj = self.create_object_meta(
+            bucket_name,
+            key,
+            size,
+            content_hash,
+            ObjectData::Inline { data },
+        )?;
+        Ok(obj)
     }
 
     /// Delete an object from a bucket.
@@ -439,6 +462,7 @@ mod tests {
             meta_path,
             metrics,
             StorageEngine::Fjall,
+            Some(1),
         );
         (fs, dir)
     }

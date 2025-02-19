@@ -74,6 +74,10 @@ impl Object {
         }
     }
 
+    pub fn minimum_inline_metadata_size() -> usize {
+        minimum_raw_object_size() + PTR_SIZE // size of common fields + size of data_len field
+    }
+
     pub fn to_vec(&self) -> Vec<u8> {
         self.into()
     }
@@ -121,6 +125,7 @@ impl Object {
             .to_rfc3339_opts(SecondsFormat::Secs, true)
     }
 
+    // Returns the number of bytes this object would take up in serialized form.
     fn num_bytes(&self) -> usize {
         let mandatory_fields_size = 17 + BLOCKID_SIZE;
         match &self.data {
@@ -131,6 +136,13 @@ impl Object {
                 mandatory_fields_size + PTR_SIZE + (blocks.len() * BLOCKID_SIZE) + PTR_SIZE
             }
             ObjectData::Inline { data } => mandatory_fields_size + PTR_SIZE + data.len(),
+        }
+    }
+
+    pub fn inlined(&self) -> Option<&Vec<u8>> {
+        match &self.data {
+            ObjectData::Inline { data } => Some(data),
+            _ => None,
         }
     }
 }

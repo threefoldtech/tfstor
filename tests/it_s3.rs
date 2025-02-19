@@ -73,6 +73,7 @@ fn config() -> &'static SdkConfig {
             FS_ROOT.into(),
             metrics.clone(),
             storage_engine,
+            Some(1),
         );
         let s3fs = s3_cas::s3fs::S3FS::new(FS_ROOT.into(), FS_ROOT.into(), casfs, metrics.clone());
 
@@ -175,7 +176,7 @@ async fn test_put_delete_object() -> Result<()> {
         let body = ByteStream::from_static(content.as_bytes());
         let result = c
             .put_object()
-            .bucket("non-existent-bucket")
+            .bucket("non-existent-buckett")
             .key(key)
             .body(body)
             //.checksum_crc32_c(crc32c.as_str())

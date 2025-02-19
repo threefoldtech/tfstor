@@ -14,6 +14,9 @@ use std::fmt::Debug;
 /// But we separate the API to make it easier to extend in the future,
 /// and give flexibility to the implementer to have different implementations for each tree.
 pub trait MetaStore: Send + Sync + Debug + 'static {
+    // returns the maximum length of the data that can be inlined in the metadata object
+    fn max_inlined_data_length(&self) -> usize;
+
     /// returns tree which contains all the buckets.
     /// This tree is used to store the bucket lists and provide
     /// the CRUD for the bucket list.
@@ -21,7 +24,8 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
 
     fn get_bucket_tree(&self, bucket_name: &str) -> Result<Box<dyn BucketTree>, MetaError>;
 
-    /// get_bucket_ext returns the tree for specific bucket with the extended methods.
+    /// get_bucket_ext returns the tree for specific bucket with the extended methods
+    /// we use this tree to provide additional methods for the bucket like the range and list methods.
     fn get_bucket_ext(&self, name: &str)
         -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError>;
 
@@ -29,6 +33,8 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// This tree is used to store the data block metadata.
     fn get_block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError>;
 
+    /// get_tree returns the tree with the given name.
+    /// It is usually used if the app need to store some metadata for a specific purpose.
     fn get_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
     /// get_path_tree returns the path meta tree

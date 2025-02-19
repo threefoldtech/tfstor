@@ -71,6 +71,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         args.meta_root.clone(),
         metrics.clone(),
         storage_engine,
+        None,
     );
     let s3fs = s3_cas::s3fs::S3FS::new(args.fs_root, args.meta_root, casfs, metrics.clone());
     let s3fs = s3_cas::metrics::MetricFs::new(s3fs, metrics.clone());
