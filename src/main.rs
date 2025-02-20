@@ -31,6 +31,9 @@ struct Args {
     #[structopt(long, default_value = "9100")]
     metric_port: u16,
 
+    #[structopt(long, help = "leave empty to disable it")]
+    inline_metadata_size: Option<usize>,
+
     #[structopt(long, requires("secret-key"), display_order = 1000)]
     access_key: Option<String>,
 
@@ -71,7 +74,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         args.meta_root.clone(),
         metrics.clone(),
         storage_engine,
-        None,
+        args.inline_metadata_size,
     );
     let s3fs = s3_cas::s3fs::S3FS::new(args.fs_root, args.meta_root, casfs, metrics.clone());
     let s3fs = s3_cas::metrics::MetricFs::new(s3fs, metrics.clone());

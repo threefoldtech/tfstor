@@ -18,12 +18,26 @@ cd s3-cas
 cargo build --release --features binary
 ```
 
+## Inline metadata
+
+Objects smaller than or equal to a configurable threshold can be stored directly in their metadata records,
+improving performance for small objects.
+
+Configure this feature using the command-line option:
+```console
+--inline-metadata-size <size>    # omit to disable inlining
+```
+
+When the size is set:
+- If the size of object data + metadata smaller than or equal to the threshold, the object data is stored in the metadata,
+  otherwise use the standard block storage
+- Setting size to 0 or omitting the option disables inlining completely
+
+Currently, objects uploaded using the multipart method will never be inlined
+because they are assumed to be large objects.
+
 ## Known issues
 
-- The metadata database (sled) has unbounded memory growth related to the objects stored. This means
-  the server will eventually consume all memory on the host and crash. To fix this the metadata database
-  should either be replaced with a new version of sled (still in development) or a different one entirely
 - Only the basic API is implemented, and even then it is not entirely implemented (for instance copy
   between servers is not implemented).
-- The codebase is very much POC and not following a good abstraction structure
 - Single key only, no support to add multiple keys with different permissions.

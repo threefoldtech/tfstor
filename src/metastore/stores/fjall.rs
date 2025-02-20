@@ -26,7 +26,7 @@ impl std::fmt::Debug for FjallStore {
     }
 }
 
-const DEFAULT_INLINED_METADATA_SIZE: usize = 1024;
+const DEFAULT_INLINED_METADATA_SIZE: usize = 1; // setting very low will practically disable it by default
 
 impl FjallStore {
     pub fn new(path: PathBuf, inlined_metadata_size: Option<usize>) -> Self {
