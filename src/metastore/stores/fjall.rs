@@ -6,7 +6,7 @@ use std::sync::Arc;
 use fjall;
 
 use crate::metastore::{
-    AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTree, BucketTreeExt,
+    AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTreeExt, Durability,
     MetaError, MetaStore, Object, BLOCKID_SIZE,
 };
 
@@ -16,6 +16,7 @@ pub struct FjallStore {
     block_partition: Arc<fjall::TxPartitionHandle>,
     path_partition: Arc<fjall::TxPartitionHandle>,
     inlined_metadata_size: usize,
+    durability: fjall::PersistMode,
 }
 
 impl std::fmt::Debug for FjallStore {
@@ -29,8 +30,12 @@ impl std::fmt::Debug for FjallStore {
 const DEFAULT_INLINED_METADATA_SIZE: usize = 1; // setting very low will practically disable it by default
 
 impl FjallStore {
-    pub fn new(path: PathBuf, inlined_metadata_size: Option<usize>) -> Self {
-        eprintln!("Opening fjall store at {:?}", path);
+    pub fn new(
+        path: PathBuf,
+        inlined_metadata_size: Option<usize>,
+        durability: Option<Durability>,
+    ) -> Self {
+        tracing::info!("Opening fjall store at {:?}", path);
         const BUCKET_META_PARTITION: &str = "_BUCKETS";
         const BLOCK_PARTITION: &str = "_BLOCKS";
         const PATH_PARTITION: &str = "_PATHS";
@@ -46,12 +51,21 @@ impl FjallStore {
             .open_partition(PATH_PARTITION, Default::default())
             .unwrap();
         let inlined_metadata_size = inlined_metadata_size.unwrap_or(DEFAULT_INLINED_METADATA_SIZE);
+
+        let durability = durability.unwrap_or(Durability::Fdatasync);
+        let durability = match durability {
+            Durability::Buffer => fjall::PersistMode::Buffer,
+            Durability::Fsync => fjall::PersistMode::SyncData,
+            Durability::Fdatasync => fjall::PersistMode::SyncAll,
+        };
+
         Self {
             keyspace: Arc::new(tx_keyspace),
             bucket_partition: Arc::new(bucket_partition),
             block_partition: Arc::new(block_partition),
             path_partition: Arc::new(path_partition),
             inlined_metadata_size,
+            durability,
         }
     }
 
@@ -67,7 +81,7 @@ impl FjallStore {
             .map_err(|e| MetaError::TransactionError(e.to_string()))?;
 
         self.keyspace
-            .persist(fjall::PersistMode::SyncAll)
+            .persist(self.durability)
             .map_err(|e| MetaError::PersistError(e.to_string()))?;
         Ok(())
     }
@@ -96,14 +110,6 @@ impl MetaStore for FjallStore {
         Ok(Box::new(FjallTree::new(
             self.keyspace.clone(),
             self.bucket_partition.clone(),
-        )))
-    }
-
-    fn get_bucket_tree(&self, bucket_name: &str) -> Result<Box<dyn BucketTree>, MetaError> {
-        let bucket = self.get_partition(bucket_name)?;
-        Ok(Box::new(FjallTree::new(
-            self.keyspace.clone(),
-            Arc::new(bucket),
         )))
     }
 
@@ -171,6 +177,26 @@ impl MetaStore for FjallStore {
             })
             .collect();
         Ok(buckets)
+    }
+
+    fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
+        let bucket = self.get_partition(bucket_name)?;
+        let mut tx = self.keyspace.write_tx();
+        tx.insert(&bucket, key, raw_obj);
+        self.commit_persist(tx)
+    }
+
+    fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
+        let bucket = self.get_partition(bucket_name)?;
+        let read_tx = self.keyspace.read_tx();
+        let raw_object = match read_tx.get(&bucket, key) {
+            Ok(Some(o)) => o,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
+        };
+
+        let obj = Object::try_from(&*raw_object).expect("Malformed object");
+        Ok(Some(obj))
     }
 
     fn delete_object(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError> {
@@ -328,33 +354,6 @@ impl BaseMetaTree for FjallTree {
     }
 }
 
-impl BucketTree for FjallTree {
-    fn insert_meta(&self, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
-        let mut tx = self.keyspace.write_tx();
-        tx.insert(&self.partition, key, raw_obj);
-        tx.commit()
-            .map_err(|e| MetaError::TransactionError(e.to_string()))?;
-
-        self.keyspace
-            .persist(fjall::PersistMode::SyncAll)
-            .map_err(|e| MetaError::PersistError(e.to_string()))?;
-
-        Ok(())
-    }
-
-    fn get_meta(&self, key: &str) -> Result<Option<Object>, MetaError> {
-        let read_tx = self.keyspace.read_tx();
-        let raw_object = match read_tx.get(&self.partition, key) {
-            Ok(Some(o)) => o,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-
-        let obj = Object::try_from(&*raw_object).expect("Malformed object bro");
-        Ok(Some(obj))
-    }
-}
-
 impl BlockTree for FjallTree {
     fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError> {
         let block_data = match self.get(key) {
@@ -474,7 +473,7 @@ mod tests {
 
     fn setup_store() -> (FjallStore, tempfile::TempDir) {
         let dir = tempdir().unwrap();
-        let store = FjallStore::new(dir.path().to_path_buf(), Some(1));
+        let store = FjallStore::new(dir.path().to_path_buf(), Some(1), None);
         (store, dir)
     }
 
@@ -519,8 +518,6 @@ mod tests {
             .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
 
-        let bucket = store.get_bucket_tree(bucket_name).unwrap();
-
         // Test object insertion
         let test_obj = Object::new(
             1024,                   // 1KB object
@@ -529,15 +526,20 @@ mod tests {
                 blocks: vec![BlockID::from([1; 16])],
             },
         );
-        bucket.insert_meta(key, test_obj.to_vec()).unwrap();
+        store
+            .insert_meta(&bucket_name, key, test_obj.to_vec())
+            .unwrap();
 
         // Test object retrieval
-        let retrieved_obj = bucket.get_meta(key).unwrap().unwrap();
+        let retrieved_obj = store.get_meta(&bucket_name, key).unwrap().unwrap();
         assert_eq!(retrieved_obj.blocks().len(), 1);
         assert_eq!(retrieved_obj.blocks()[0], BlockID::from([1; 16]));
 
         // Test error cases of object retrieval
-        assert!(bucket.get_meta("nonexistent-key").unwrap().is_none());
+        assert!(store
+            .get_meta(bucket_name, "nonexistent-key")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -553,8 +555,10 @@ mod tests {
         store
             .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
-        let bucket = store.get_bucket_tree(bucket_name).unwrap();
-        assert!(bucket.get_meta("nonexistent").unwrap().is_none());
+        assert!(store
+            .get_meta(bucket_name, "nonexistent")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -568,8 +572,6 @@ mod tests {
             .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
 
-        let bucket = store.get_bucket_tree(bucket_name).unwrap();
-
         // Insert test objects
         let test_keys = vec!["a", "b", "c"];
         for key in &test_keys {
@@ -580,7 +582,7 @@ mod tests {
                     blocks: vec![BlockID::from([1; 16])],
                 },
             );
-            bucket.insert_meta(key, obj.to_vec()).unwrap();
+            store.insert_meta(bucket_name, key, obj.to_vec()).unwrap();
         }
 
         let bucket = store.get_bucket_ext(bucket_name).unwrap();
@@ -620,8 +622,6 @@ mod tests {
             .insert_bucket(bucket_name, bucket_meta.to_vec())
             .unwrap();
 
-        let bucket = store.get_bucket_tree(bucket_name).unwrap();
-
         // Insert test objects with unordered keys
         let test_data = vec![
             ("c/1", "data5"),
@@ -639,7 +639,7 @@ mod tests {
                     blocks: vec![BlockID::from([1; 16])],
                 },
             );
-            bucket.insert_meta(key, obj.to_vec()).unwrap();
+            store.insert_meta(bucket_name, key, obj.to_vec()).unwrap();
         }
 
         let bucket = store.get_bucket_ext(bucket_name).unwrap();

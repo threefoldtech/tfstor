@@ -1,15 +1,15 @@
-use s3_cas::cas::{CasFS, StorageEngine};
-
 use std::path::PathBuf;
 
 use anyhow::Result;
-
 use bytes::Bytes;
 use http_body_util::Full;
 use prometheus::Encoder;
 use structopt::StructOpt;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
+
+use s3_cas::cas::{CasFS, StorageEngine};
+use s3_cas::metastore::Durability;
 
 #[derive(StructOpt)]
 struct Args {
@@ -39,6 +39,13 @@ struct Args {
 
     #[structopt(long, requires("access-key"), display_order = 1000)]
     secret_key: Option<String>,
+
+    #[structopt(
+        long,
+        default_value = "fdatasync",
+        help = "Durability level (buffer, fsync, fdatasync)"
+    )]
+    durability: Durability,
 }
 
 fn setup_tracing() {
@@ -75,6 +82,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         metrics.clone(),
         storage_engine,
         args.inline_metadata_size,
+        Some(args.durability),
     );
     let s3fs = s3_cas::s3fs::S3FS::new(args.fs_root, args.meta_root, casfs, metrics.clone());
     let s3fs = s3_cas::metrics::MetricFs::new(s3fs, metrics.clone());

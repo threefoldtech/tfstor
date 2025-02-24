@@ -8,8 +8,8 @@ use super::{
 use crate::metrics::SharedMetrics;
 
 use crate::metastore::{
-    BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, FjallStore, MetaError, MetaStore,
-    Object, ObjectData,
+    BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, Durability, FjallStore, MetaError,
+    MetaStore, Object, ObjectData,
 };
 
 use faster_hex::hex_string;
@@ -84,11 +84,16 @@ impl CasFS {
         metrics: SharedMetrics,
         storage_engine: StorageEngine,
         inlined_metadata_size: Option<usize>,
+        durability: Option<Durability>,
     ) -> Self {
         meta_path.push("db");
         root.push("blocks");
         let meta_store: Box<dyn MetaStore> = match storage_engine {
-            StorageEngine::Fjall => Box::new(FjallStore::new(meta_path, inlined_metadata_size)),
+            StorageEngine::Fjall => Box::new(FjallStore::new(
+                meta_path,
+                inlined_metadata_size,
+                durability,
+            )),
         };
 
         // Get the current amount of buckets
@@ -139,8 +144,8 @@ impl CasFS {
         object_data: ObjectData,
     ) -> Result<Object, MetaError> {
         let obj_meta = Object::new(size, hash, object_data);
-        let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
-        bucket.insert_meta(key, obj_meta.to_vec())?;
+        self.meta_store
+            .insert_meta(bucket_name, key, obj_meta.to_vec())?;
         Ok(obj_meta)
     }
 
@@ -150,8 +155,7 @@ impl CasFS {
         bucket_name: &str,
         key: &str,
     ) -> Result<Option<Object>, MetaError> {
-        let bucket = self.meta_store.get_bucket_tree(bucket_name)?;
-        bucket.get_meta(key)
+        self.meta_store.get_meta(bucket_name, key)
     }
 
     // create and insert a new  bucket
@@ -243,6 +247,7 @@ impl CasFS {
     }
 
     /// Delete an object from a bucket.
+    /// it also delete keys under it's tree
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), MetaError> {
         let path_map = self.path_tree()?;
 
@@ -462,6 +467,7 @@ mod tests {
             metrics,
             StorageEngine::Fjall,
             Some(1),
+            Some(Durability::Buffer),
         );
         (fs, dir)
     }

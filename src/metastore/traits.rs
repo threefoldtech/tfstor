@@ -6,6 +6,7 @@ use super::{
 };
 
 use std::fmt::Debug;
+use std::str::FromStr;
 
 /// MetaStore is the interface that defines the methods to interact with the metadata store.
 ///
@@ -21,8 +22,6 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// This tree is used to store the bucket lists and provide
     /// the CRUD for the bucket list.
     fn get_allbuckets_tree(&self) -> Result<Box<dyn AllBucketsTree>, MetaError>;
-
-    fn get_bucket_tree(&self, bucket_name: &str) -> Result<Box<dyn BucketTree>, MetaError>;
 
     /// get_bucket_ext returns the tree for specific bucket with the extended methods
     /// we use this tree to provide additional methods for the bucket like the range and list methods.
@@ -53,6 +52,13 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
+
+    /// insert_meta inserts a metadata Object into the bucket
+    fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError>;
+
+    /// get_meta returns the Object metadata for the given bucket and key.
+    /// We return the Object struct instead of the raw bytes for performance reason.
+    fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError>;
 
     /// delete object in a bucket for the given key.
     ///
@@ -109,15 +115,6 @@ pub trait AllBucketsTree: BaseMetaTree {}
 
 impl<T: BaseMetaTree> AllBucketsTree for T {}
 
-pub trait BucketTree: BaseMetaTree {
-    /// insert_meta inserts a metadata Object into the bucket
-    fn insert_meta(&self, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError>;
-
-    /// get_meta returns the Object metadata for the given bucket and key.
-    /// We return the Object struct instead of the raw bytes for performance reason.
-    fn get_meta(&self, key: &str) -> Result<Option<Object>, MetaError>;
-}
-
 pub trait BlockTree: Send + Sync {
     /// get_block_obj returns the `Object` for the given key.
     fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError>;
@@ -136,4 +133,22 @@ pub trait BucketTreeExt: BaseMetaTree {
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)>;
 }
 
-//pub trait BucketTreeExt: BaseMetaTree + MetaTreeExt {}
+#[derive(Debug, Clone, Copy)]
+pub enum Durability {
+    Buffer,
+    Fsync,
+    Fdatasync,
+}
+
+impl FromStr for Durability {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "buffer" => Ok(Durability::Buffer),
+            "fsync" => Ok(Durability::Fsync),
+            "fdatasync" => Ok(Durability::Fdatasync),
+            _ => Err(format!("Unknown durability option: {}", s)),
+        }
+    }
+}
