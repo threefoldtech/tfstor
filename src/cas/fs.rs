@@ -362,9 +362,8 @@ impl CasFS {
                     false
                 };
 
-                let write_meta_result =
-                    self.meta_store
-                        .write_block(block_hash, data_len, key_has_block);
+                let mut store_tx = self.meta_store.begin_transaction();
+                let write_meta_result = store_tx.write_block(block_hash, data_len, key_has_block);
 
                 let mut pm = PendingMarker::new(self.metrics.clone());
 
@@ -376,13 +375,18 @@ impl CasFS {
                         return;
                     }
                     Ok((false, _)) => {
+                        // the block already exists, no need to write it to the storage
                         pm.block_ignored();
+
+                        Box::new(store_tx).commit().unwrap();
+
                         if let Err(e) = tx.send(Ok((idx, block_hash))).await {
                             error!("Could not send block id: {}", e);
                         }
                         return;
                     }
                     Ok((true, block)) => {
+                        // the block does not exist, we need to write it to the storage
                         pm.block_pending();
                         block
                     }
@@ -404,6 +408,8 @@ impl CasFS {
                         return;
                     }
                 }
+
+                Box::new(store_tx).commit().unwrap();
 
                 pm.block_written(bytes.len());
 

@@ -97,6 +97,18 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
         data_len: usize,
         key_has_block: bool,
     ) -> Result<(bool, Block), MetaError>;
+
+    fn begin_transaction(&self) -> Box<dyn Transaction>;
+}
+
+pub trait Transaction: Send + Sync {
+    fn commit(self: Box<Self>) -> Result<(), MetaError>;
+    fn write_block(
+        &mut self,
+        block_hash: BlockID,
+        data_len: usize,
+        key_has_block: bool,
+    ) -> Result<(bool, Block), MetaError>;
 }
 
 pub trait BaseMetaTree: Send + Sync {

@@ -7,9 +7,10 @@ use fjall;
 
 use crate::metastore::{
     AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTreeExt, Durability,
-    MetaError, MetaStore, Object, BLOCKID_SIZE,
+    MetaError, MetaStore, Object, Transaction, BLOCKID_SIZE,
 };
 
+#[derive(Clone)]
 pub struct FjallStore {
     keyspace: Arc<fjall::TxKeyspace>,
     bucket_partition: Arc<fjall::TxPartitionHandle>,
@@ -298,6 +299,77 @@ impl MetaStore for FjallStore {
         };
         self.commit_persist(tx)?;
         res
+    }
+
+    fn begin_transaction(&self) -> Box<dyn Transaction> {
+        // Use unsafe to extend lifetime to 'static since the transaction
+        // won't outlive the store
+        let tx = unsafe {
+            std::mem::transmute::<fjall::WriteTransaction<'_>, fjall::WriteTransaction<'static>>(
+                self.keyspace.write_tx(),
+            )
+        };
+
+        Box::new(FjallTransaction {
+            tx,
+            store: Arc::new(self.clone()),
+        })
+    }
+}
+
+pub struct FjallTransaction {
+    tx: fjall::WriteTransaction<'static>,
+    store: Arc<FjallStore>,
+}
+
+unsafe impl Send for FjallTransaction {}
+unsafe impl Sync for FjallTransaction {}
+
+impl Transaction for FjallTransaction {
+    fn commit(self: Box<Self>) -> Result<(), MetaError> {
+        self.store.commit_persist(self.tx)
+    }
+
+    fn write_block(
+        &mut self,
+        block_hash: BlockID,
+        data_len: usize,
+        key_has_block: bool,
+    ) -> Result<(bool, Block), MetaError> {
+        let blocks = self.store.block_partition.clone();
+        let paths = self.store.path_partition.clone();
+
+        match self.tx.get(&blocks, block_hash) {
+            Ok(Some(block_data)) => {
+                let mut block =
+                    Block::try_from(&*block_data).expect("Only valid blocks are stored");
+
+                if !key_has_block {
+                    block.increment_refcount();
+                    self.tx.insert(&blocks, block_hash, block.to_vec());
+                }
+                Ok((false, block))
+            }
+            Ok(None) => {
+                let mut idx = 0;
+                for index in 1..BLOCKID_SIZE {
+                    match self.tx.get(&paths, &block_hash[..index]) {
+                        Ok(Some(_)) => continue,
+                        Ok(None) => {
+                            idx = index;
+                            break;
+                        }
+                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
+                    }
+                }
+
+                self.tx.insert(&paths, &block_hash[..idx], block_hash);
+                let block = Block::new(data_len, block_hash[..idx].to_vec());
+                self.tx.insert(&blocks, block_hash, block.to_vec());
+                Ok((true, block))
+            }
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+        }
     }
 }
 
