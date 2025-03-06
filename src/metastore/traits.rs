@@ -104,6 +104,9 @@ impl<T: BaseMetaTree> AllBucketsTree for T {}
 pub trait BlockTree: Send + Sync {
     /// get_block_obj returns the `Object` for the given key.
     fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError>;
+
+    #[cfg(test)]
+    fn len(&self) -> Result<usize, MetaError>;
 }
 
 pub trait BucketTreeExt: BaseMetaTree {

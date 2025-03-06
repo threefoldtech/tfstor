@@ -402,6 +402,13 @@ impl BlockTree for FjallTree {
         };
         Ok(Some(block))
     }
+
+    #[cfg(test)]
+    fn len(&self) -> Result<usize, MetaError> {
+        let read_tx = self.keyspace.read_tx();
+        let len = read_tx.len(&self.partition).map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+        Ok(len)
+    }
 }
 
 impl BucketTreeExt for FjallTree {

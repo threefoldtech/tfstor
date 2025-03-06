@@ -65,8 +65,32 @@ impl Drop for PendingMarker {
     }
 }
 
+use async_trait::async_trait;
+
+#[async_trait]
+trait AsyncFileSystem: Send + Sync + std::fmt::Debug {
+    async fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()>;
+    async fn write(&self, path: &std::path::Path, contents: &[u8]) -> std::io::Result<()>;
+}
+
+#[derive(Debug)]
+struct RealAsyncFs;
+
+#[async_trait]
+impl AsyncFileSystem for RealAsyncFs {
+    async fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()> {
+        async_fs::create_dir_all(path).await
+    }
+
+    async fn write(&self, path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+        async_fs::write(path, contents).await
+    }
+}
+
+
 #[derive(Debug)]
 pub struct CasFS {
+    async_fs: Box<dyn AsyncFileSystem>,
     meta_store: Box<dyn MetaStore>,
     root: PathBuf,
     metrics: SharedMetrics,
@@ -102,6 +126,7 @@ impl CasFS {
         let tree = meta_store.get_tree("_MULTIPART_PARTS").unwrap();
         let multipart_tree = MultiPartTree::new(tree);
         Self {
+            async_fs: Box::new(RealAsyncFs),
             meta_store,
             root,
             metrics,
@@ -399,12 +424,12 @@ impl CasFS {
                         block
                     }
                 };
-
+               
                 let mut store_tx = Some(store_tx);
                 // write the actual block to disk
                 // if the disk operation fails, the database transaction is rolled back.
                 let block_path = block.disk_path(self.root.clone());
-                if let Err(e) = async_fs::create_dir_all(block_path.parent().unwrap()).await {
+                if let Err(e) = self.async_fs.create_dir_all(block_path.parent().unwrap()).await {
                     if let Some(store_tx) = store_tx.take() {
                         Box::new(store_tx).rollback();
                     }
@@ -415,7 +440,7 @@ impl CasFS {
                         return;
                     }
                 }
-                if let Err(e) = async_fs::write(block_path, &bytes).await {
+                if let Err(e) = self.async_fs.write(&block_path, &bytes).await {
                      if let Some(store_tx) = store_tx.take() {
                         Box::new(store_tx).rollback();
                     }
@@ -506,6 +531,83 @@ mod tests {
         (fs, dir)
     }
 
+    #[derive(Debug)]
+    struct MockFs {
+        should_fail_write: bool,
+    }
+    
+    impl MockFs {
+        fn new() -> Self {
+            Self {
+                should_fail_write: false, 
+            }
+        }
+    }
+    
+    #[async_trait]
+    impl AsyncFileSystem for MockFs {
+        async fn create_dir_all(&self, _path: &std::path::Path) -> std::io::Result<()> {
+            Ok(())
+        }
+        
+        async fn write(&self, _path: &std::path::Path, _contents: &[u8]) -> std::io::Result<()> {
+            if !self.should_fail_write {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "Mock write failure"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl CasFS {
+        #[cfg(test)]
+        fn with_mock_fs(mut self) -> (Self, MockFs) {  // Changed return type
+            let mock_fs = MockFs::new();
+            self.async_fs = Box::new(mock_fs.clone());  // Implement Clone for MockFs
+            (self, mock_fs)
+        }
+    }
+
+    // Add Clone implementation for MockFs
+    impl Clone for MockFs {
+        fn clone(&self) -> Self {
+            Self {
+                should_fail_write: self.should_fail_write,
+            }
+        }
+    }
+
+    // Example test using the mock
+    #[tokio::test]
+    async fn test_store_object_write_failure() {
+        let (fs, _) = setup_test_fs().0.with_mock_fs();
+        let bucket_name = "test_bucket";
+        let key = "test_key";
+        fs.create_bucket(bucket_name).unwrap();
+
+        
+        let test_data = b"test data".repeat(100);
+        let stream = ByteStream::new(stream::once(async move { 
+            Ok(Bytes::from(test_data))
+        }));
+
+        let result = fs.store_object(bucket_name, key, stream).await;
+        assert!(result.is_err());
+
+        // Verify the error
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert_eq!(err.to_string(), "Mock write failure");
+
+        // Verify no blocks were stored in metadata
+        // the block must be rolled back
+        let block_tree = fs.meta_store.get_block_tree().unwrap();
+        assert_eq!(block_tree.len().unwrap(), 0);
+
+        // Verify object metadata was not created
+        assert!(!fs.key_exists(bucket_name, key).unwrap());
+    }
+
     #[tokio::test]
     async fn test_store_object() {
         // Setup
@@ -535,6 +637,7 @@ mod tests {
 
         // Verify block & path was stored
         let block_tree = fs.meta_store.get_block_tree().unwrap();
+        assert!(block_tree.len().unwrap() > 0);
         let stored_block = block_tree.get_block(&obj.blocks()[0]).unwrap().unwrap();
         assert_eq!(stored_block.size(), test_data_len);
         assert_eq!(stored_block.rc(), 1);
