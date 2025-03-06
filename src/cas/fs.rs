@@ -400,11 +400,15 @@ impl CasFS {
                     }
                 };
 
+                let mut store_tx = Some(store_tx);
                 // write the actual block to disk
-                // if the disk operation fails, the database transaction is not committed
-                // and the block is not written to the database.
+                // if the disk operation fails, the database transaction is rolled back.
                 let block_path = block.disk_path(self.root.clone());
                 if let Err(e) = async_fs::create_dir_all(block_path.parent().unwrap()).await {
+                    if let Some(store_tx) = store_tx.take() {
+                        Box::new(store_tx).rollback();
+                    }
+
                     if let Err(e) = tx.send(Err(e)).await {
                         pm.block_write_error();
                         error!("Could not send path create error: {}", e);
@@ -412,6 +416,10 @@ impl CasFS {
                     }
                 }
                 if let Err(e) = async_fs::write(block_path, &bytes).await {
+                     if let Some(store_tx) = store_tx.take() {
+                        Box::new(store_tx).rollback();
+                    }
+
                     if let Err(e) = tx.send(Err(e)).await {
                         pm.block_write_error();
                         error!("Could not send block write error: {}", e);
@@ -419,13 +427,16 @@ impl CasFS {
                     }
                 }
 
-                if let Err(err) = Box::new(store_tx).commit() {
-                    // TODO FIXME if the transaction fails, we need to delete the block from the storage
-                    if let Err(e) = tx.send(Err(err.into())).await {
-                        pm.block_write_error();
-                        error!("Could not send transaction error: {}", e);
+                // commit the database transaction
+                if let Some(store_tx) = store_tx.take() {
+                    if let Err(err) = Box::new(store_tx).commit() {
+                        // TODO FIXME if the transaction fails, we need to delete the block from the storage
+                        if let Err(e) = tx.send(Err(err.into())).await {
+                            pm.block_write_error();
+                            error!("Could not send transaction error: {}", e);
+                        }
+                        return;
                     }
-                    return;
                 }
 
                 pm.block_written(bytes.len());
