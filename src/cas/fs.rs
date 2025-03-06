@@ -362,6 +362,14 @@ impl CasFS {
                     false
                 };
 
+                // begin the transaction
+                // there are two main things we need to do here:
+                // 1. write the meta to the database
+                //      - if the block already exists, we don't need to write it to the storage
+                //      - if the block does not exist, we need to write it to the storage
+                // 2. write the actual block to disk
+                //
+                // we commit the meta database transaction after writing the block to disk
                 let mut store_tx = self.meta_store.begin_transaction();
                 let write_meta_result = store_tx.write_block(block_hash, data_len, key_has_block);
 
@@ -393,6 +401,8 @@ impl CasFS {
                 };
 
                 // write the actual block to disk
+                // if the disk operation fails, the database transaction is not committed
+                // and the block is not written to the database.
                 let block_path = block.disk_path(self.root.clone());
                 if let Err(e) = async_fs::create_dir_all(block_path.parent().unwrap()).await {
                     if let Err(e) = tx.send(Err(e)).await {
@@ -409,7 +419,14 @@ impl CasFS {
                     }
                 }
 
-                Box::new(store_tx).commit().unwrap();
+                if let Err(err) = Box::new(store_tx).commit() {
+                    // TODO FIXME if the transaction fails, we need to delete the block from the storage
+                    if let Err(e) = tx.send(Err(err.into())).await {
+                        pm.block_write_error();
+                        error!("Could not send transaction error: {}", e);
+                    }
+                    return;
+                }
 
                 pm.block_written(bytes.len());
 

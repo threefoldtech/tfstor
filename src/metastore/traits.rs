@@ -71,38 +71,12 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     ///       we do it there because we still couldn't abstract the DB transaction.
     fn delete_object(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError>;
 
-    // Write a block to the block map.
-    //
-    // block_hash is hash of the block, which become the key in the block map.
-    // data_len is the length of the block data.
-    // key_has_block is true if the coresponding key already has the block
-    //
-    // It returns a tuple of bool and Block:
-    // - bool is true if the block is new, hence need to be written to the disk
-    // - Block is the block object
-    //
-    // It should do at least the following:
-    // - Check if the hash is present in the block map
-    //    - if exists and key_has_block is false: increment the refcount
-    //   - if exists and key_has_block is true: do nothing
-    //    - if not exists:
-    //          - find the path for it
-    //          - insert the block into the block map
-    //
-    // TODO: all the above steps shouldn't be done in the meta storage layer.
-    //       we do it there because we still couldn't abstract the DB transaction.
-    fn write_block(
-        &self,
-        block_hash: BlockID,
-        data_len: usize,
-        key_has_block: bool,
-    ) -> Result<(bool, Block), MetaError>;
-
     fn begin_transaction(&self) -> Box<dyn Transaction>;
 }
 
 pub trait Transaction: Send + Sync {
     fn commit(self: Box<Self>) -> Result<(), MetaError>;
+    fn rollback(self: Box<Self>);
     fn write_block(
         &mut self,
         block_hash: BlockID,

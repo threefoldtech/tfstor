@@ -243,64 +243,6 @@ impl MetaStore for FjallStore {
         Ok(to_delete)
     }
 
-    fn write_block(
-        &self,
-        block_hash: BlockID,
-        data_len: usize,
-        key_has_block: bool,
-    ) -> Result<(bool, Block), MetaError> {
-        let blocks = self.block_partition.clone();
-        let paths = self.path_partition.clone();
-
-        let mut tx = self.keyspace.write_tx();
-        let res = match tx.get(&blocks, block_hash) {
-            Ok(Some(block_data)) => {
-                // Block already exists
-
-                let mut block =
-                    Block::try_from(&*block_data).expect("Only valid blocks are stored");
-
-                // if the key already has this block, the block doesn't got more references
-                // and we don't need to write it back.
-                if !key_has_block {
-                    // bump refcount on the block
-                    block.increment_refcount();
-                    // write block back
-                    // TODO: this could be done in an `update_and_fetch`
-                    tx.insert(&blocks, block_hash, block.to_vec());
-                }
-                Ok((false, block))
-            }
-            Ok(None) => {
-                let mut idx = 0;
-                // find a free path
-                for index in 1..BLOCKID_SIZE {
-                    match tx.get(&paths, &block_hash[..index]) {
-                        Ok(Some(_)) => continue,
-                        Ok(None) => {
-                            idx = index;
-                            break;
-                        }
-                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-                    }
-                }
-                // The loop above can only NOT find a path in case it is duplicate
-                // block, wich already breaks out at the start.
-
-                // path is free, insert
-                tx.insert(&paths, &block_hash[..idx], block_hash);
-
-                let block = Block::new(data_len, block_hash[..idx].to_vec());
-
-                tx.insert(&blocks, block_hash, block.to_vec());
-                Ok((true, block))
-            }
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        };
-        self.commit_persist(tx)?;
-        res
-    }
-
     fn begin_transaction(&self) -> Box<dyn Transaction> {
         // Use unsafe to extend lifetime to 'static since the transaction
         // won't outlive the store
@@ -310,24 +252,40 @@ impl MetaStore for FjallStore {
             )
         };
 
-        Box::new(FjallTransaction {
-            tx,
-            store: Arc::new(self.clone()),
-        })
+        Box::new(FjallTransaction::new(tx, Arc::new(self.clone())))
     }
 }
 
 pub struct FjallTransaction {
-    tx: fjall::WriteTransaction<'static>,
+    tx: Option<fjall::WriteTransaction<'static>>,
     store: Arc<FjallStore>,
+}
+
+impl FjallTransaction {
+    pub fn new(tx: fjall::WriteTransaction<'static>, store: Arc<FjallStore>) -> Self {
+        Self {
+            tx: Some(tx),
+            store,
+        }
+    }
 }
 
 unsafe impl Send for FjallTransaction {}
 unsafe impl Sync for FjallTransaction {}
 
 impl Transaction for FjallTransaction {
-    fn commit(self: Box<Self>) -> Result<(), MetaError> {
-        self.store.commit_persist(self.tx)
+    fn commit(mut self: Box<Self>) -> Result<(), MetaError> {
+        if let Some(tx) = self.tx.take() {
+            self.store.commit_persist(tx)
+        } else {
+            Err(MetaError::TransactionError("Transaction already rolled back".to_string()))
+        }
+    }
+
+    fn rollback(mut self: Box<Self>) {
+        if let Some(tx) = self.tx.take() {
+            tx.rollback();
+        }
     }
 
     fn write_block(
@@ -339,21 +297,25 @@ impl Transaction for FjallTransaction {
         let blocks = self.store.block_partition.clone();
         let paths = self.store.path_partition.clone();
 
-        match self.tx.get(&blocks, block_hash) {
+        let tx = self.tx.as_mut().ok_or_else(|| {
+            MetaError::TransactionError("Transaction already rolled back".to_string())
+        })?;
+
+        match tx.get(&blocks, block_hash) {
             Ok(Some(block_data)) => {
                 let mut block =
                     Block::try_from(&*block_data).expect("Only valid blocks are stored");
 
                 if !key_has_block {
                     block.increment_refcount();
-                    self.tx.insert(&blocks, block_hash, block.to_vec());
+                    tx.insert(&blocks, block_hash, block.to_vec());
                 }
                 Ok((false, block))
             }
             Ok(None) => {
                 let mut idx = 0;
                 for index in 1..BLOCKID_SIZE {
-                    match self.tx.get(&paths, &block_hash[..index]) {
+                    match tx.get(&paths, &block_hash[..index]) {
                         Ok(Some(_)) => continue,
                         Ok(None) => {
                             idx = index;
@@ -363,9 +325,9 @@ impl Transaction for FjallTransaction {
                     }
                 }
 
-                self.tx.insert(&paths, &block_hash[..idx], block_hash);
+                tx.insert(&paths, &block_hash[..idx], block_hash);
                 let block = Block::new(data_len, block_hash[..idx].to_vec());
-                self.tx.insert(&blocks, block_hash, block.to_vec());
+                tx.insert(&blocks, block_hash, block.to_vec());
                 Ok((true, block))
             }
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
