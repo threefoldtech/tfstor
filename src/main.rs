@@ -42,6 +42,13 @@ struct Args {
 
     #[structopt(
         long,
+        default_value = "fjall",
+        help = "Metadata DB (fjall, fjall_notx)"
+    )]
+    metadata_db: StorageEngine,
+
+    #[structopt(
+        long,
         default_value = "fdatasync",
         help = "Durability level (buffer, fsync, fdatasync)"
     )]
@@ -72,7 +79,7 @@ use s3s::service::S3ServiceBuilder;
 
 #[tokio::main]
 async fn run(args: Args) -> anyhow::Result<()> {
-    let storage_engine = StorageEngine::Fjall;
+    let storage_engine = args.metadata_db;
 
     // provider
     let metrics = s3_cas::metrics::SharedMetrics::new();
