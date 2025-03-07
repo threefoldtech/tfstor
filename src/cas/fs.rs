@@ -8,8 +8,8 @@ use super::{
 use crate::metrics::SharedMetrics;
 
 use crate::metastore::{
-    BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, Durability, FjallStore, MetaError,
-    MetaStore, Object, ObjectData,
+    BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, Durability, FjallStore,
+    FjallStoreNotx, MetaError, MetaStore, Object, ObjectData,
 };
 
 use faster_hex::hex_string;
@@ -87,7 +87,6 @@ impl AsyncFileSystem for RealAsyncFs {
     }
 }
 
-
 #[derive(Debug)]
 pub struct CasFS {
     async_fs: Box<dyn AsyncFileSystem>,
@@ -99,6 +98,7 @@ pub struct CasFS {
 
 pub enum StorageEngine {
     Fjall,
+    FjallNotx,
 }
 
 impl CasFS {
@@ -118,6 +118,9 @@ impl CasFS {
                 inlined_metadata_size,
                 durability,
             )),
+            StorageEngine::FjallNotx => {
+                Box::new(FjallStoreNotx::new(meta_path, inlined_metadata_size))
+            }
         };
 
         // Get the current amount of buckets
@@ -424,12 +427,16 @@ impl CasFS {
                         block
                     }
                 };
-               
+
                 let mut store_tx = Some(store_tx);
                 // write the actual block to disk
                 // if the disk operation fails, the database transaction is rolled back.
                 let block_path = block.disk_path(self.root.clone());
-                if let Err(e) = self.async_fs.create_dir_all(block_path.parent().unwrap()).await {
+                if let Err(e) = self
+                    .async_fs
+                    .create_dir_all(block_path.parent().unwrap())
+                    .await
+                {
                     if let Some(store_tx) = store_tx.take() {
                         Box::new(store_tx).rollback();
                     }
@@ -441,7 +448,7 @@ impl CasFS {
                     }
                 }
                 if let Err(e) = self.async_fs.write(&block_path, &bytes).await {
-                     if let Some(store_tx) = store_tx.take() {
+                    if let Some(store_tx) = store_tx.take() {
                         Box::new(store_tx).rollback();
                     }
 
@@ -515,7 +522,7 @@ mod tests {
 
     static METRICS: Lazy<SharedMetrics> = Lazy::new(|| SharedMetrics::new());
 
-    fn setup_test_fs() -> (CasFS, tempfile::TempDir) {
+    fn setup_test_fs(storage_engine: StorageEngine) -> (CasFS, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let meta_path = dir.path().join("meta");
         let metrics = METRICS.clone();
@@ -524,7 +531,7 @@ mod tests {
             dir.path().to_path_buf(),
             meta_path,
             metrics,
-            StorageEngine::Fjall,
+            storage_engine,
             Some(1),
             Some(Durability::Buffer),
         );
@@ -535,24 +542,27 @@ mod tests {
     struct MockFs {
         should_fail_write: bool,
     }
-    
+
     impl MockFs {
         fn new() -> Self {
             Self {
-                should_fail_write: false, 
+                should_fail_write: false,
             }
         }
     }
-    
+
     #[async_trait]
     impl AsyncFileSystem for MockFs {
         async fn create_dir_all(&self, _path: &std::path::Path) -> std::io::Result<()> {
             Ok(())
         }
-        
+
         async fn write(&self, _path: &std::path::Path, _contents: &[u8]) -> std::io::Result<()> {
             if !self.should_fail_write {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "Mock write failure"))
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Mock write failure",
+                ))
             } else {
                 Ok(())
             }
@@ -561,9 +571,10 @@ mod tests {
 
     impl CasFS {
         #[cfg(test)]
-        fn with_mock_fs(mut self) -> (Self, MockFs) {  // Changed return type
+        fn with_mock_fs(mut self) -> (Self, MockFs) {
+            // Changed return type
             let mock_fs = MockFs::new();
-            self.async_fs = Box::new(mock_fs.clone());  // Implement Clone for MockFs
+            self.async_fs = Box::new(mock_fs.clone()); // Implement Clone for MockFs
             (self, mock_fs)
         }
     }
@@ -579,17 +590,24 @@ mod tests {
 
     // Example test using the mock
     #[tokio::test]
-    async fn test_store_object_write_failure() {
-        let (fs, _) = setup_test_fs().0.with_mock_fs();
+    async fn test_store_object_write_failure_fjall() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall).0.with_mock_fs();
+        do_test_store_object_write_failure(fs).await;
+    }
+
+    #[tokio::test]
+    async fn test_store_object_write_failure_fjall_notx() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx).0.with_mock_fs();
+        do_test_store_object_write_failure(fs).await;
+    }
+
+    async fn do_test_store_object_write_failure(fs: CasFS) {
         let bucket_name = "test_bucket";
         let key = "test_key";
         fs.create_bucket(bucket_name).unwrap();
 
-        
         let test_data = b"test data".repeat(100);
-        let stream = ByteStream::new(stream::once(async move { 
-            Ok(Bytes::from(test_data))
-        }));
+        let stream = ByteStream::new(stream::once(async move { Ok(Bytes::from(test_data)) }));
 
         let result = fs.store_object(bucket_name, key, stream).await;
         assert!(result.is_err());
@@ -609,13 +627,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_object() {
-        // Setup
-        let (fs, _dir) = setup_test_fs();
-        let bucket_name = "test_bucket";
-        let key1 = "test_key1";
-        let key2 = "test_key2";
-        fs.create_bucket(bucket_name).unwrap();
+    async fn test_store_object_fjall() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
+        do_test_store_object(fs).await;
+    }
+
+    #[tokio::test]
+    async fn test_store_object_fjall_notx() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
+        do_test_store_object(fs).await;
+    }
+
+    async fn do_test_store_object(fs: CasFS) {
+        const BUCKET_NAME: &str = "test_bucket";
+        const KEY1: &str = "test_key1";
+        const KEY2: &str = "test_key2";
+        fs.create_bucket(BUCKET_NAME).unwrap();
 
         // Create ByteStream from test data
         let test_data = b"long test data".repeat(100).to_vec();
@@ -627,7 +654,7 @@ mod tests {
 
         // Store object
         let obj = fs
-            .store_single_object_and_meta(bucket_name, key1, stream)
+            .store_single_object_and_meta(BUCKET_NAME, KEY1, stream)
             .await
             .unwrap();
 
@@ -658,7 +685,7 @@ mod tests {
         ));
 
         let new_obj = fs
-            .store_single_object_and_meta(bucket_name, key2, stream)
+            .store_single_object_and_meta(BUCKET_NAME, KEY2, stream)
             .await
             .unwrap();
 
@@ -669,9 +696,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_inlined_object() {
-        // Setup
-        let (fs, _dir) = setup_test_fs();
+    async fn test_store_inlined_object_fjall() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
+        do_test_store_inlined_object(fs).await;
+    }
+
+    #[tokio::test]
+    async fn test_store_inlined_object_fjall_notx() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
+        do_test_store_inlined_object(fs).await;
+    }
+
+    async fn do_test_store_inlined_object(fs: CasFS) {
         let bucket_name = "test_bucket";
         let key = "test_key1";
         fs.create_bucket(bucket_name).unwrap();
@@ -687,10 +723,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_object_refcount() {
-        // Setup
-        let (fs, _dir) = setup_test_fs();
+    async fn test_store_object_refcount_fjall() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
+        do_test_store_object_refcount(fs).await;
+    }
 
+    #[tokio::test]
+    async fn test_store_object_refcount_fjall_notx() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
+        do_test_store_object_refcount(fs).await;
+    }
+
+    async fn do_test_store_object_refcount(fs: CasFS) {
         let bucket_name = "test_bucket";
         let key1 = "test_key1";
         let key2 = "test_key2";
@@ -754,12 +798,22 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_store_and_delete_object_fjall() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
+        do_test_store_and_delete_object(fs).await;
+    }
+
+    #[tokio::test]
+    async fn test_store_and_delete_object_fjall_notx() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
+        do_test_store_and_delete_object(fs).await;
+    }
+
     // test store and delete object
     // - store an object
     // - delete the object
-    #[tokio::test]
-    async fn test_store_and_delete_object() {
-        let (fs, _dir) = setup_test_fs();
+    async fn do_test_store_and_delete_object(fs: CasFS) {
         let bucket_name = "test-bucket";
         let key = "test/key";
 
@@ -812,6 +866,18 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_store_and_delete_object_with_refcount_same_blocks_diffkey() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
+        do_test_store_and_delete_object_with_refcount_same_blocks_diffkey(fs).await;
+    }
+
+    #[tokio::test]
+    async fn test_store_and_delete_object_with_refcount_same_blocks_diffkey_fjall_notx() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
+        do_test_store_and_delete_object_with_refcount_same_blocks_diffkey(fs).await;
+    }
+
     // Test storing and deleting an object with refcount
     // - store object
     //       refcount == 1
@@ -821,9 +887,7 @@ mod tests {
     // - check block/disk/whatever is still there
     // - delete the second object
     // - check block/disk/whatever should be gone
-    #[tokio::test]
-    async fn test_store_and_delete_object_with_refcount_same_blocks_diffkey() {
-        let (fs, _dir) = setup_test_fs();
+    async fn do_test_store_and_delete_object_with_refcount_same_blocks_diffkey(fs: CasFS) {
         let bucket = "test-bucket";
         let key1 = "test/key1";
         let key2 = "test/key2";
@@ -890,6 +954,18 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_store_and_delete_object_with_refcount_same_blocks_samekey_fjall() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
+        do_test_store_and_delete_object_with_refcount_same_blocks_samekey(fs).await;
+    }
+
+    #[tokio::test]
+    async fn test_store_and_delete_object_with_refcount_same_blocks_samekey_fjall_notx() {
+        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
+        do_test_store_and_delete_object_with_refcount_same_blocks_samekey(fs).await;
+    }
+
     // Test storing and deleting an object with refcount
     // - store object
     //       refcount == 1
@@ -897,9 +973,7 @@ mod tests {
     //      refcount == 1
     // - delete the object
     // - check block/disk/whatever should be gone
-    #[tokio::test]
-    async fn test_store_and_delete_object_with_refcount_same_blocks_samekey() {
-        let (fs, _dir) = setup_test_fs();
+    async fn do_test_store_and_delete_object_with_refcount_same_blocks_samekey(fs: CasFS) {
         let bucket = "test-bucket";
         let key1 = "test/key1";
 

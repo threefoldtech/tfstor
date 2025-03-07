@@ -278,7 +278,9 @@ impl Transaction for FjallTransaction {
         if let Some(tx) = self.tx.take() {
             self.store.commit_persist(tx)
         } else {
-            Err(MetaError::TransactionError("Transaction already rolled back".to_string()))
+            Err(MetaError::TransactionError(
+                "Transaction already rolled back".to_string(),
+            ))
         }
     }
 
@@ -406,7 +408,9 @@ impl BlockTree for FjallTree {
     #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError> {
         let read_tx = self.keyspace.read_tx();
-        let len = read_tx.len(&self.partition).map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+        let len = read_tx
+            .len(&self.partition)
+            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
         Ok(len)
     }
 }
@@ -509,43 +513,46 @@ impl BucketTreeExt for FjallTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use crate::metastore::stores::test_utils;
-    
+    use tempfile::tempdir;
 
     fn setup_store() -> (FjallStore, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let store = FjallStore::new(dir.path().to_path_buf(), Some(1), None);
         (store, dir)
     }
-    
 
     impl test_utils::TestStore for FjallStore {
         fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
-            <FjallStore as MetaStore>::insert_bucket(self,bucket_name, raw_bucket)
+            <FjallStore as MetaStore>::insert_bucket(self, bucket_name, raw_bucket)
         }
 
         fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-            <FjallStore as MetaStore>::bucket_exists(self,bucket_name)
+            <FjallStore as MetaStore>::bucket_exists(self, bucket_name)
         }
 
         fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
             <FjallStore as MetaStore>::list_buckets(self)
         }
 
-        fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
-            <FjallStore as MetaStore>::insert_meta(self,bucket_name, key, raw_obj)
+        fn insert_meta(
+            &self,
+            bucket_name: &str,
+            key: &str,
+            raw_obj: Vec<u8>,
+        ) -> Result<(), MetaError> {
+            <FjallStore as MetaStore>::insert_meta(self, bucket_name, key, raw_obj)
         }
 
         fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
-            <FjallStore as MetaStore>::get_meta(self,bucket_name, key)
+            <FjallStore as MetaStore>::get_meta(self, bucket_name, key)
         }
 
         fn get_bucket_ext(
             &self,
             name: &str,
         ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-            <FjallStore as MetaStore>::get_bucket_ext(self,name)
+            <FjallStore as MetaStore>::get_bucket_ext(self, name)
         }
     }
 
@@ -578,5 +585,4 @@ mod tests {
         let (store, _dir) = setup_store();
         test_utils::test_range_filter(&store);
     }
-
 }

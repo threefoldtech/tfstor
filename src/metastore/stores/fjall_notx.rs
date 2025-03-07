@@ -6,8 +6,8 @@ use std::sync::Arc;
 use fjall;
 
 use crate::metastore::{
-    AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTreeExt,
-    MetaError, MetaStore, Object, Transaction, BLOCKID_SIZE,
+    AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTreeExt, MetaError,
+    MetaStore, Object, Transaction, BLOCKID_SIZE,
 };
 
 #[derive(Clone)]
@@ -27,12 +27,8 @@ impl std::fmt::Debug for FjallStoreNotx {
     }
 }
 
-
 impl FjallStoreNotx {
-    pub fn new(
-        path: PathBuf,
-        inlined_metadata_size: Option<usize>,
-    ) -> Self {
+    pub fn new(path: PathBuf, inlined_metadata_size: Option<usize>) -> Self {
         tracing::info!("Opening fjall store at {:?}", path);
         const BUCKET_META_PARTITION: &str = "_BUCKETS";
         const BLOCK_PARTITION: &str = "_BLOCKS";
@@ -51,7 +47,6 @@ impl FjallStoreNotx {
         // setting very low will practically disable it by default
         let inlined_metadata_size = inlined_metadata_size.unwrap_or(1);
 
-        
         Self {
             keyspace: Arc::new(keyspace),
             bucket_partition: Arc::new(bucket_partition),
@@ -82,34 +77,24 @@ impl MetaStore for FjallStoreNotx {
         name: &str,
     ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
         let bucket = self.get_partition(name)?;
-        Ok(Box::new(FjallTreeNotx::new(
-            Arc::new(bucket),
-        )))
+        Ok(Box::new(FjallTreeNotx::new(Arc::new(bucket))))
     }
 
     fn get_allbuckets_tree(&self) -> Result<Box<dyn AllBucketsTree>, MetaError> {
-        Ok(Box::new(FjallTreeNotx::new(
-            self.bucket_partition.clone(),
-        )))
+        Ok(Box::new(FjallTreeNotx::new(self.bucket_partition.clone())))
     }
 
     fn get_block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError> {
-        Ok(Box::new(FjallTreeNotx::new(
-            self.block_partition.clone(),
-        )))
+        Ok(Box::new(FjallTreeNotx::new(self.block_partition.clone())))
     }
 
     fn get_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         let partition = self.get_partition(name)?;
-        Ok(Box::new(FjallTreeNotx::new(
-            Arc::new(partition),
-        )))
+        Ok(Box::new(FjallTreeNotx::new(Arc::new(partition))))
     }
 
     fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        Ok(Box::new(FjallTreeNotx::new(
-            self.path_partition.clone(),
-        )))
+        Ok(Box::new(FjallTreeNotx::new(self.path_partition.clone())))
     }
 
     fn drop_bucket(&self, name: &str) -> Result<(), MetaError> {
@@ -121,7 +106,9 @@ impl MetaStore for FjallStoreNotx {
     }
 
     fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
-        self.bucket_partition.insert(bucket_name, raw_bucket).map_err(|e| MetaError::InsertError(e.to_string()))?;
+        self.bucket_partition
+            .insert(bucket_name, raw_bucket)
+            .map_err(|e| MetaError::InsertError(e.to_string()))?;
 
         match self.get_partition(bucket_name) {
             // get partition to create it
@@ -137,7 +124,8 @@ impl MetaStore for FjallStoreNotx {
 
     /// Get a list of all buckets in the system.
     fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        let buckets = self.bucket_partition
+        let buckets = self
+            .bucket_partition
             .range::<Vec<u8>, _>(std::ops::RangeFull) // Specify type parameter for range
             .filter_map(|raw_value| {
                 let value = match raw_value {
@@ -154,7 +142,9 @@ impl MetaStore for FjallStoreNotx {
 
     fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
         let bucket = self.get_partition(bucket_name)?;
-        bucket.insert(key, raw_obj).map_err(|e| MetaError::InsertError(e.to_string()))
+        bucket
+            .insert(key, raw_obj)
+            .map_err(|e| MetaError::InsertError(e.to_string()))
     }
 
     fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
@@ -183,10 +173,12 @@ impl MetaStore for FjallStoreNotx {
 
         // delete the object in the database, we have it in memory to remove the
         // blocks as needed.
-        bucket.remove( key).map_err(|e| MetaError::RemoveError(e.to_string()))?;
+        bucket
+            .remove(key)
+            .map_err(|e| MetaError::RemoveError(e.to_string()))?;
 
         for block_id in obj.blocks() {
-            match self.block_partition.get( block_id) {
+            match self.block_partition.get(block_id) {
                 Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
                 Ok(None) => continue,
                 Ok(Some(block_data)) => {
@@ -198,11 +190,15 @@ impl MetaStore for FjallStoreNotx {
                     // filled in by another block, before we properly delete the
                     // path from disk.
                     if block.rc() == 1 {
-                        self.block_partition.remove(block_id).map_err(|e| MetaError::RemoveError(e.to_string()))?;
+                        self.block_partition
+                            .remove(block_id)
+                            .map_err(|e| MetaError::RemoveError(e.to_string()))?;
                         to_delete.push(block);
                     } else {
                         block.decrement_refcount();
-                        self.block_partition.insert(block_id, block.to_vec()).map_err(|e| MetaError::InsertError(e.to_string()))?;
+                        self.block_partition
+                            .insert(block_id, block.to_vec())
+                            .map_err(|e| MetaError::InsertError(e.to_string()))?;
                     }
                 }
             }
@@ -211,18 +207,25 @@ impl MetaStore for FjallStoreNotx {
     }
 
     fn begin_transaction(&self) -> Box<dyn Transaction> {
-        Box::new(FjallNoTransaction::new( Arc::new(self.clone())))
+        Box::new(FjallNoTransaction::new(Arc::new(self.clone())))
     }
 }
 
+// FjallNoTransaction is fjall without real transaction support.
+// the transaction is not really reliable because we support it by ourself,
+// not provided by the underlying database.
 pub struct FjallNoTransaction {
     store: Arc<FjallStoreNotx>,
+    inserted_blocks: Vec<BlockID>,
+    inserted_paths: Vec<Vec<u8>>,
 }
 
 impl FjallNoTransaction {
-    pub fn new( store: Arc<FjallStoreNotx>) -> Self {
+    pub fn new(store: Arc<FjallStoreNotx>) -> Self {
         Self {
             store,
+            inserted_blocks: Vec::new(),
+            inserted_paths: Vec::new(),
         }
     }
 }
@@ -236,7 +239,13 @@ impl Transaction for FjallNoTransaction {
     }
 
     fn rollback(self: Box<Self>) {
-        // TODO: homegrown rollback
+        for block_id in self.inserted_blocks {
+            let _ = self.store.block_partition.remove(block_id);
+        }
+
+        for path in self.inserted_paths {
+            let _ = self.store.path_partition.remove(&path);
+        }
     }
 
     fn write_block(
@@ -248,7 +257,6 @@ impl Transaction for FjallNoTransaction {
         let blocks = self.store.block_partition.clone();
         let paths = self.store.path_partition.clone();
 
-       
         match blocks.get(block_hash) {
             Ok(Some(block_data)) => {
                 let mut block =
@@ -256,7 +264,10 @@ impl Transaction for FjallNoTransaction {
 
                 if !key_has_block {
                     block.increment_refcount();
-                    blocks.insert( block_hash, block.to_vec()).map_err(|e| MetaError::InsertError(e.to_string()))?;
+                    blocks
+                        .insert(block_hash, block.to_vec())
+                        .map_err(|e| MetaError::InsertError(e.to_string()))?;
+                    self.inserted_blocks.push(block_hash);
                 }
                 Ok((false, block))
             }
@@ -273,9 +284,16 @@ impl Transaction for FjallNoTransaction {
                     }
                 }
 
-                paths.insert(&block_hash[..idx], block_hash).map_err(|e| MetaError::InsertError(e.to_string()))?;
+                paths
+                    .insert(&block_hash[..idx], block_hash)
+                    .map_err(|e| MetaError::InsertError(e.to_string()))?;
+                self.inserted_paths.push(block_hash[..idx].to_vec());
+
                 let block = Block::new(data_len, block_hash[..idx].to_vec());
-                blocks.insert(block_hash, block.to_vec()).map_err(|e| MetaError::InsertError(e.to_string()))?;
+                blocks
+                    .insert(block_hash, block.to_vec())
+                    .map_err(|e| MetaError::InsertError(e.to_string()))?;
+                self.inserted_blocks.push(block_hash);
                 Ok((true, block))
             }
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
@@ -289,9 +307,7 @@ pub struct FjallTreeNotx {
 
 impl FjallTreeNotx {
     pub fn new(partition: Arc<fjall::PartitionHandle>) -> Self {
-        Self {
-            partition,
-        }
+        Self { partition }
     }
 
     fn get(&self, key: &[u8]) -> Result<Option<fjall::Slice>, MetaError> {
@@ -397,13 +413,13 @@ impl BucketTreeExt for FjallTreeNotx {
             (Some(prefix), Some(ctsa_local)) if ctsa_local < prefix => {
                 // If ctsa is before prefix, ignore ctsa
                 ctsa = None;
-                Box::new(partition.prefix( prefix.as_bytes()))
+                Box::new(partition.prefix(prefix.as_bytes()))
             }
             (Some(prefix), _) => Box::new(partition.prefix(prefix.as_bytes())),
             (None, Some(ctsa)) => {
                 let mut next_key = ctsa.as_bytes().to_vec();
                 next_key.push(0);
-                Box::new(partition.range( next_key..))
+                Box::new(partition.range(next_key..))
             }
             (None, None) => Box::new(partition.range::<Vec<u8>, _>(..)),
         };
@@ -444,7 +460,10 @@ impl BlockTree for FjallTreeNotx {
 
     #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError> {
-        let len = self.partition.len().map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+        let len = self
+            .partition
+            .len()
+            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
         Ok(len)
     }
 }
@@ -457,30 +476,35 @@ mod tests {
 
     impl test_utils::TestStore for FjallStoreNotx {
         fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
-            <FjallStoreNotx as MetaStore>::insert_bucket(self,bucket_name, raw_bucket)
+            <FjallStoreNotx as MetaStore>::insert_bucket(self, bucket_name, raw_bucket)
         }
 
         fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-            <FjallStoreNotx as MetaStore>::bucket_exists(self,bucket_name)
+            <FjallStoreNotx as MetaStore>::bucket_exists(self, bucket_name)
         }
 
         fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
             <FjallStoreNotx as MetaStore>::list_buckets(self)
         }
 
-        fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
-            <FjallStoreNotx as MetaStore>::insert_meta(self,bucket_name, key, raw_obj)
+        fn insert_meta(
+            &self,
+            bucket_name: &str,
+            key: &str,
+            raw_obj: Vec<u8>,
+        ) -> Result<(), MetaError> {
+            <FjallStoreNotx as MetaStore>::insert_meta(self, bucket_name, key, raw_obj)
         }
 
         fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
-            <FjallStoreNotx as MetaStore>::get_meta(self,bucket_name, key)
+            <FjallStoreNotx as MetaStore>::get_meta(self, bucket_name, key)
         }
 
         fn get_bucket_ext(
             &self,
             name: &str,
         ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-            <FjallStoreNotx as MetaStore>::get_bucket_ext(self,name)
+            <FjallStoreNotx as MetaStore>::get_bucket_ext(self, name)
         }
     }
 
