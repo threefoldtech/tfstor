@@ -63,6 +63,7 @@ use std::sync::Mutex as StdMutex;
 
 // Create a static CONFIG_SIZE to store the inlined size
 static CONFIG_SIZE: StdMutex<Option<usize>> = StdMutex::new(None);
+static CONFIG_ENGINE: StdMutex<Option<s3_cas::cas::StorageEngine>> = StdMutex::new(None);
 
 static CONFIG: Lazy<SdkConfig> = Lazy::new(|| {
     setup_tracing();
@@ -71,13 +72,19 @@ static CONFIG: Lazy<SdkConfig> = Lazy::new(|| {
     let cred = Credentials::for_tests();
 
     let metrics = s3_cas::metrics::SharedMetrics::new();
-    let storage_engine = s3_cas::cas::StorageEngine::Fjall;
+    let storage_engine = CONFIG_ENGINE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .cloned()
+        .unwrap_or(s3_cas::cas::StorageEngine::Fjall);
+    let inlined_size = CONFIG_SIZE.lock().unwrap().or(Some(1));
     let casfs = s3_cas::cas::CasFS::new(
         FS_ROOT.into(),
         FS_ROOT.into(),
         metrics.clone(),
         storage_engine,
-        Some(1),
+        inlined_size,
         None,
     );
     let s3fs = s3_cas::s3fs::S3FS::new(FS_ROOT.into(), FS_ROOT.into(), casfs, metrics.clone());
@@ -105,12 +112,11 @@ static CONFIG: Lazy<SdkConfig> = Lazy::new(|| {
         .build()
 });
 
-fn setup_test() -> &'static SdkConfig {
-    setup_test_with_inlined_size(Some(1))
-}
-
-fn setup_test_with_inlined_size(inlined_metadata_size: Option<usize>) -> &'static SdkConfig {
-    // Set the inlined size before accessing CONFIG
+fn setup_test(
+    engine: s3_cas::cas::StorageEngine,
+    inlined_metadata_size: Option<usize>,
+) -> &'static SdkConfig {
+    *CONFIG_ENGINE.lock().unwrap() = Some(engine);
     *CONFIG_SIZE.lock().unwrap() = inlined_metadata_size;
     &CONFIG
 }
@@ -140,20 +146,25 @@ async fn create_bucket(c: &Client, bucket: &str) -> Result<()> {
 #[tracing::instrument]
 async fn test_put_delete_object() -> Result<()> {
     let test_cases = [
-        Some(1),        // Small inline size, the object will never be inlined
-        Some(10240000), // Very Large inline size, the object will always be inlined
+        (s3_cas::cas::StorageEngine::Fjall, Some(1)),
+        (s3_cas::cas::StorageEngine::Fjall, Some(10240000)),
+        (s3_cas::cas::StorageEngine::FjallNotx, Some(1)),
+        (s3_cas::cas::StorageEngine::FjallNotx, Some(10240000)),
     ];
 
-    for size in test_cases {
-        do_test_put_delete_object(size).await?;
+    for (engine, size) in test_cases {
+        do_test_put_delete_object(engine, size).await?;
     }
     Ok(())
 }
 
-async fn do_test_put_delete_object(inlined_metadata_size: Option<usize>) -> Result<()> {
+async fn do_test_put_delete_object(
+    engine: s3_cas::cas::StorageEngine,
+    inlined_metadata_size: Option<usize>,
+) -> Result<()> {
     let _guard = serial().await;
 
-    let c = Client::new(setup_test_with_inlined_size(inlined_metadata_size));
+    let c = Client::new(setup_test(engine, inlined_metadata_size));
     let bucket = format!("test-single-object-{}", Uuid::new_v4());
     let bucket = bucket.as_str();
     let key = "sample.txt";
@@ -233,10 +244,19 @@ async fn do_test_put_delete_object(inlined_metadata_size: Option<usize>) -> Resu
     Ok(())
 }
 
+use s3_cas::cas::StorageEngine;
+const METADATA_DBS: [StorageEngine; 2] = [StorageEngine::Fjall, StorageEngine::FjallNotx];
 #[tokio::test]
 #[tracing::instrument]
-async fn test_list_buckets() -> Result<()> {
-    let c = Client::new(setup_test());
+async fn test_list_bucket() -> Result<()> {
+    for engine in METADATA_DBS {
+        do_test_list_buckets(engine).await?;
+    }
+    Ok(())
+}
+
+async fn do_test_list_buckets(engine: s3_cas::cas::StorageEngine) -> Result<()> {
+    let c = Client::new(setup_test(engine, Some(1)));
     let response1 = log_and_unwrap!(c.list_buckets().send().await);
     drop(response1);
 
@@ -263,7 +283,14 @@ async fn test_list_buckets() -> Result<()> {
 #[tokio::test]
 #[tracing::instrument]
 async fn test_list_objects_v2() -> Result<()> {
-    let c = Client::new(setup_test());
+    for engine in METADATA_DBS {
+        do_test_list_objects_v2(engine).await?;
+    }
+    Ok(())
+}
+
+async fn do_test_list_objects_v2(engine: s3_cas::cas::StorageEngine) -> Result<()> {
+    let c = Client::new(setup_test(engine, Some(1)));
     let bucket = format!("test-list-objects-v2-{}", Uuid::new_v4());
     let bucket_str = bucket.as_str();
     create_bucket(&c, bucket_str).await?;
@@ -338,13 +365,20 @@ async fn test_list_objects_v2() -> Result<()> {
 
 #[tokio::test]
 async fn test_list_objects_v2_startafter() -> Result<()> {
+    for engine in METADATA_DBS {
+        do_test_list_objects_v2_startafter(engine).await?;
+    }
+    Ok(())
+}
+
+async fn do_test_list_objects_v2_startafter(engine: StorageEngine) -> Result<()> {
     //env_logger::init_from_env(
     //    env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "error"),
     //);
 
     log::error!("Starting test_list_objects_v2_startafter");
 
-    let c = Client::new(setup_test());
+    let c = Client::new(setup_test(engine, Some(1)));
     let bucket = format!("test-list-{}", Uuid::new_v4());
     let bucket_str = bucket.as_str();
     create_bucket(&c, bucket_str).await?;
@@ -459,9 +493,16 @@ async fn test_list_objects_v2_startafter() -> Result<()> {
 #[tokio::test]
 #[tracing::instrument]
 async fn test_multipart() -> Result<()> {
+    for engine in METADATA_DBS {
+        do_test_multipart(engine).await?;
+    }
+    Ok(())
+}
+
+async fn do_test_multipart(engine: StorageEngine) -> Result<()> {
     let _guard = serial().await;
 
-    let c = Client::new(setup_test());
+    let c = Client::new(setup_test(engine, Some(1)));
 
     let bucket = format!("test-multipart-{}", Uuid::new_v4());
     let bucket = bucket.as_str();
