@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use std::{io, path::PathBuf};
 
@@ -96,9 +97,22 @@ pub struct CasFS {
     multipart_tree: Arc<MultiPartTree>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum StorageEngine {
     Fjall,
     FjallNotx,
+}
+
+impl FromStr for StorageEngine {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "fjall" => Ok(StorageEngine::Fjall),
+            "fjall_notx" => Ok(StorageEngine::FjallNotx),
+            _ => Err(format!("Unknown storage engine: {}", s)),
+        }
+    }
 }
 
 impl CasFS {
@@ -520,6 +534,8 @@ mod tests {
     use rusoto_core::ByteStream;
     use tempfile::tempdir;
 
+    const TEST_ENGINES: [StorageEngine; 2] = [StorageEngine::Fjall, StorageEngine::FjallNotx];
+
     static METRICS: Lazy<SharedMetrics> = Lazy::new(|| SharedMetrics::new());
 
     fn setup_test_fs(storage_engine: StorageEngine) -> (CasFS, tempfile::TempDir) {
@@ -588,17 +604,12 @@ mod tests {
         }
     }
 
-    // Example test using the mock
     #[tokio::test]
-    async fn test_store_object_write_failure_fjall() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall).0.with_mock_fs();
-        do_test_store_object_write_failure(fs).await;
-    }
-
-    #[tokio::test]
-    async fn test_store_object_write_failure_fjall_notx() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx).0.with_mock_fs();
-        do_test_store_object_write_failure(fs).await;
+    async fn test_store_object_write_failure() {
+        for engine in TEST_ENGINES {
+            let (fs, _dir) = setup_test_fs(engine).0.with_mock_fs();
+            do_test_store_object_write_failure(fs).await;
+        }
     }
 
     async fn do_test_store_object_write_failure(fs: CasFS) {
@@ -627,15 +638,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_object_fjall() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
-        do_test_store_object(fs).await;
-    }
-
-    #[tokio::test]
-    async fn test_store_object_fjall_notx() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
-        do_test_store_object(fs).await;
+    async fn test_store_object() {
+        for engine in TEST_ENGINES {
+            let (fs, _dir) = setup_test_fs(engine);
+            do_test_store_object(fs).await;
+        }
     }
 
     async fn do_test_store_object(fs: CasFS) {
@@ -696,15 +703,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_inlined_object_fjall() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
-        do_test_store_inlined_object(fs).await;
-    }
-
-    #[tokio::test]
-    async fn test_store_inlined_object_fjall_notx() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
-        do_test_store_inlined_object(fs).await;
+    async fn test_store_inlined_object() {
+        for engine in TEST_ENGINES {
+            let (fs, _dir) = setup_test_fs(engine);
+            do_test_store_inlined_object(fs).await;
+        }
     }
 
     async fn do_test_store_inlined_object(fs: CasFS) {
@@ -723,15 +726,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_object_refcount_fjall() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
-        do_test_store_object_refcount(fs).await;
-    }
-
-    #[tokio::test]
-    async fn test_store_object_refcount_fjall_notx() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
-        do_test_store_object_refcount(fs).await;
+    async fn test_store_object_refcount() {
+        for engine in TEST_ENGINES {
+            let (fs, _dir) = setup_test_fs(engine);
+            do_test_store_object_refcount(fs).await;
+        }
     }
 
     async fn do_test_store_object_refcount(fs: CasFS) {
@@ -799,15 +798,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_and_delete_object_fjall() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
-        do_test_store_and_delete_object(fs).await;
-    }
-
-    #[tokio::test]
-    async fn test_store_and_delete_object_fjall_notx() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
-        do_test_store_and_delete_object(fs).await;
+    async fn test_store_and_delete_object() {
+        for engine in TEST_ENGINES {
+            let (fs, _dir) = setup_test_fs(engine);
+            do_test_store_and_delete_object(fs).await;
+        }
     }
 
     // test store and delete object
@@ -868,14 +863,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_and_delete_object_with_refcount_same_blocks_diffkey() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
-        do_test_store_and_delete_object_with_refcount_same_blocks_diffkey(fs).await;
-    }
-
-    #[tokio::test]
-    async fn test_store_and_delete_object_with_refcount_same_blocks_diffkey_fjall_notx() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
-        do_test_store_and_delete_object_with_refcount_same_blocks_diffkey(fs).await;
+        for engine in TEST_ENGINES {
+            let (fs, _dir) = setup_test_fs(engine);
+            do_test_store_and_delete_object_with_refcount_same_blocks_diffkey(fs).await;
+        }
     }
 
     // Test storing and deleting an object with refcount
@@ -955,15 +946,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_store_and_delete_object_with_refcount_same_blocks_samekey_fjall() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::Fjall);
-        do_test_store_and_delete_object_with_refcount_same_blocks_samekey(fs).await;
-    }
-
-    #[tokio::test]
-    async fn test_store_and_delete_object_with_refcount_same_blocks_samekey_fjall_notx() {
-        let (fs, _dir) = setup_test_fs(StorageEngine::FjallNotx);
-        do_test_store_and_delete_object_with_refcount_same_blocks_samekey(fs).await;
+    async fn test_store_and_delete_object_with_refcount_same_blocks_samekey() {
+        for engine in TEST_ENGINES {
+            let (fs, _dir) = setup_test_fs(engine);
+            do_test_store_and_delete_object_with_refcount_same_blocks_samekey(fs).await;
+        }
     }
 
     // Test storing and deleting an object with refcount
