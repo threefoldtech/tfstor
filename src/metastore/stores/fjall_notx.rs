@@ -448,3 +448,75 @@ impl BlockTree for FjallTreeNotx {
         Ok(len)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metastore::stores::test_utils;
+    use tempfile::tempdir;
+
+    impl test_utils::TestStore for FjallStoreNotx {
+        fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
+            <FjallStoreNotx as MetaStore>::insert_bucket(self,bucket_name, raw_bucket)
+        }
+
+        fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
+            <FjallStoreNotx as MetaStore>::bucket_exists(self,bucket_name)
+        }
+
+        fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
+            <FjallStoreNotx as MetaStore>::list_buckets(self)
+        }
+
+        fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
+            <FjallStoreNotx as MetaStore>::insert_meta(self,bucket_name, key, raw_obj)
+        }
+
+        fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
+            <FjallStoreNotx as MetaStore>::get_meta(self,bucket_name, key)
+        }
+
+        fn get_bucket_ext(
+            &self,
+            name: &str,
+        ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+            <FjallStoreNotx as MetaStore>::get_bucket_ext(self,name)
+        }
+    }
+
+    fn setup_store() -> (FjallStoreNotx, tempfile::TempDir) {
+        let dir = tempdir().unwrap();
+        let store = FjallStoreNotx::new(dir.path().to_path_buf(), Some(1));
+        (store, dir)
+    }
+
+    #[test]
+    fn test_errors() {
+        let (store, _dir) = setup_store();
+        test_utils::test_errors(&store);
+    }
+
+    #[test]
+    fn test_bucket_operations() {
+        let (store, _dir) = setup_store();
+        test_utils::test_bucket_operations(&store);
+    }
+
+    #[test]
+    fn test_object_operations() {
+        let (store, _dir) = setup_store();
+        test_utils::test_object_operations(&store);
+    }
+
+    #[test]
+    fn test_get_bucket_keys() {
+        let (store, _dir) = setup_store();
+        test_utils::test_get_bucket_keys(&store);
+    }
+
+    #[test]
+    fn test_range_filter() {
+        let (store, _dir) = setup_store();
+        test_utils::test_range_filter(&store);
+    }
+}
