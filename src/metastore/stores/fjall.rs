@@ -254,6 +254,14 @@ impl MetaStore for FjallStore {
 
         Box::new(FjallTransaction::new(tx, Arc::new(self.clone())))
     }
+
+    fn num_keys(&self) -> (usize, usize, usize) {
+        unimplemented!();
+    }
+
+    fn disk_space(&self) -> u64 {
+        self.keyspace.disk_space()
+    }
 }
 
 pub struct FjallTransaction {

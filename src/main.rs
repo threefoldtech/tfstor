@@ -2,57 +2,67 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use bytes::Bytes;
+use clap::{Parser, Subcommand};
 use http_body_util::Full;
 use prometheus::Encoder;
-use structopt::StructOpt;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use s3_cas::cas::{CasFS, StorageEngine};
 use s3_cas::metastore::Durability;
 
-#[derive(StructOpt)]
-struct Args {
-    #[structopt(long, default_value = ".")]
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    #[arg(long, default_value = ".")]
     fs_root: PathBuf,
 
-    #[structopt(long, default_value = ".")]
+    #[arg(long, default_value = ".")]
     meta_root: PathBuf,
 
-    #[structopt(long, default_value = "localhost")]
+    #[arg(long, default_value = "localhost")]
     host: String,
 
-    #[structopt(long, default_value = "8014")]
+    #[arg(long, default_value = "8014")]
     port: u16,
 
-    #[structopt(long, default_value = "localhost")]
+    #[arg(long, default_value = "localhost")]
     metric_host: String,
 
-    #[structopt(long, default_value = "9100")]
+    #[arg(long, default_value = "9100")]
     metric_port: u16,
 
-    #[structopt(long, help = "leave empty to disable it")]
+    #[arg(long, help = "leave empty to disable it")]
     inline_metadata_size: Option<usize>,
 
-    #[structopt(long, requires("secret-key"), display_order = 1000)]
+    #[arg(long, required = true, display_order = 1000)]
     access_key: Option<String>,
 
-    #[structopt(long, requires("access-key"), display_order = 1000)]
+    #[arg(long, required = true, display_order = 1000)]
     secret_key: Option<String>,
 
-    #[structopt(
+    #[arg(
         long,
         default_value = "fjall",
-        help = "Metadata DB (fjall, fjall_notx)"
+        help = "Metadata DB  (fjall, fjall_notx)"
     )]
     metadata_db: StorageEngine,
 
-    #[structopt(
+    #[arg(
         long,
         default_value = "fdatasync",
         help = "Durability level (buffer, fsync, fdatasync)"
     )]
     durability: Durability,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    // TODO: inspect DB
+    Inspect,
 }
 
 fn setup_tracing() {
@@ -67,10 +77,16 @@ fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     setup_tracing();
-
-    let args: Args = Args::from_args();
-
-    run(args)
+    let cli = Cli::parse();
+    match cli.command {
+        Some(Command::Inspect) => {
+            println!("Inspecting");
+        }
+        None => {
+            run(cli)?;
+        }
+    }
+    Ok(())
 }
 
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -78,7 +94,7 @@ use hyper_util::server::conn::auto::Builder as ConnBuilder;
 use s3s::service::S3ServiceBuilder;
 
 #[tokio::main]
-async fn run(args: Args) -> anyhow::Result<()> {
+async fn run(args: Cli) -> anyhow::Result<()> {
     let storage_engine = args.metadata_db;
 
     // provider

@@ -347,8 +347,9 @@ impl S3 for S3FS {
         }
 
         // load metadata
-        let obj_meta = match self.casfs.get_object_meta(&bucket, &key) {
-            Ok(Some(obj_meta)) => obj_meta,
+
+        let (obj_meta, blocks) = match self.casfs.get_object_blocks(&bucket, &key) {
+            Ok(Some((obj_meta, blocks))) => (obj_meta, blocks),
             Ok(None) => {
                 return Err(s3_error!(NoSuchKey, "Object does not exist"));
             }
@@ -387,31 +388,13 @@ impl S3 for S3FS {
         };
 
         // load the data
-        let block_map = try_!(self.casfs.block_tree());
-        let mut paths = Vec::with_capacity(obj_meta.blocks().len());
+        let mut paths = Vec::with_capacity(blocks.len());
         let mut block_size = 0;
-        for block in obj_meta.blocks() {
-            // unwrap here is safe as we only add blocks to the list of an object if they are
-            // corectly inserted in the block map
-            let block_meta = match block_map.get_block(block) {
-                Ok(Some(block_meta)) => block_meta,
-                Ok(None) => {
-                    return Err(s3_error!(
-                        InternalError,
-                        "Could not find block in block map"
-                    ));
-                }
-                Err(e) => {
-                    return Err(s3_error!(
-                        InternalError,
-                        "Could not get block from block map: {}",
-                        e
-                    ));
-                }
-            };
-            block_size += block_meta.size();
-            paths.push((block_meta.disk_path(self.root.clone()), block_meta.size()));
+        for block in blocks {
+            block_size += block.size();
+            paths.push((block.disk_path(self.root.clone()), block.size()));
         }
+
         debug_assert!(obj_meta.size() as usize == block_size);
         let block_stream = BlockStream::new(paths, block_size, range, self.metrics.clone());
         let stream = StreamingBlob::wrap(block_stream);

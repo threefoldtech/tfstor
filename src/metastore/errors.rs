@@ -40,6 +40,7 @@ pub enum MetaError {
     NotMetaTree(String),
     TransactionError(String),
     PersistError(String),
+    BlockNotFound,
     OtherDBError(String),
 }
 
@@ -59,6 +60,7 @@ impl fmt::Display for MetaError {
             MetaError::NotMetaTree(ref s) => write!(f, "Not a meta tree: {}", s),
             MetaError::TransactionError(ref s) => write!(f, "Transaction error: {}", s),
             MetaError::PersistError(ref s) => write!(f, "Persist error: {}", s),
+            MetaError::BlockNotFound => write!(f, "Block not found"),
             MetaError::OtherDBError(ref s) => write!(f, "Other DB error: {}", s),
         }
     }

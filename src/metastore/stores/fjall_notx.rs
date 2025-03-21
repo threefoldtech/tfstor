@@ -209,6 +209,18 @@ impl MetaStore for FjallStoreNotx {
     fn begin_transaction(&self) -> Box<dyn Transaction> {
         Box::new(FjallNoTransaction::new(Arc::new(self.clone())))
     }
+
+    fn num_keys(&self) -> (usize, usize, usize) {
+        (
+            self.bucket_partition.approximate_len(),
+            self.block_partition.approximate_len(),
+            self.path_partition.approximate_len(),
+        )
+    }
+
+    fn disk_space(&self) -> u64 {
+        self.keyspace.disk_space()
+    }
 }
 
 // FjallNoTransaction is fjall without real transaction support.

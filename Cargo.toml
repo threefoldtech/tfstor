@@ -23,7 +23,6 @@ async-fs = "2.1"
 faster-hex = "0.10.0"
 uuid = { version = "1.12", features = ["v4"] }
 chrono = "0.4"
-structopt = { version = "0.3.26" }
 anyhow = { version = "1.0.95" }
 dotenv = { version = "0.15" }
 openssl = { version = "0.10.68", features = ["vendored"], optional = true }
@@ -42,6 +41,7 @@ hyper-util = { version = "0.1.9", features = [
 rusoto_core = "0.48.0"
 hyper = { version = "1.6.0" }
 http-body-util = "0.1.2"
+clap = { version = "4.5.32", features = ["derive"] }
 
 
 [profile.release]

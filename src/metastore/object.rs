@@ -143,6 +143,9 @@ impl Object {
         }
     }
 
+    pub fn is_inlined(&self) -> bool {
+        matches!(&self.data, ObjectData::Inline { .. })
+    }
     pub fn inlined(&self) -> Option<&Vec<u8>> {
         match &self.data {
             ObjectData::Inline { data } => Some(data),

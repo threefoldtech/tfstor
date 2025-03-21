@@ -72,6 +72,12 @@ pub trait MetaStore: Send + Sync + Debug + 'static {
     fn delete_object(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError>;
 
     fn begin_transaction(&self) -> Box<dyn Transaction>;
+
+    // returns the number of keys of the bucket, block, and path trees.
+    fn num_keys(&self) -> (usize, usize, usize);
+
+    // returns the disk space used by the metadata store.
+    fn disk_space(&self) -> u64;
 }
 
 pub trait Transaction: Send + Sync {
