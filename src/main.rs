@@ -9,11 +9,18 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use s3_cas::cas::{CasFS, StorageEngine};
+use s3_cas::inspect::{disk_space, num_keys};
 use s3_cas::metastore::Durability;
 
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Parser, Debug)]
+pub struct ServerConfig {
     #[arg(long, default_value = ".")]
     fs_root: PathBuf,
 
@@ -54,15 +61,35 @@ struct Cli {
         help = "Durability level (buffer, fsync, fdatasync)"
     )]
     durability: Durability,
-
-    #[command(subcommand)]
-    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    // TODO: inspect DB
-    Inspect,
+    /// Inspect DB
+    Inspect {
+        #[arg(long, default_value = ".")]
+        meta_root: PathBuf,
+
+        #[arg(
+            long,
+            default_value = "fjall",
+            help = "Metadata DB  (fjall, fjall_notx)"
+        )]
+        metadata_db: StorageEngine,
+
+        #[command(subcommand)]
+        command: InspectCommand,
+    },
+
+    /// Start S3-cas server
+    Server(ServerConfig),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum InspectCommand {
+    // number of keys
+    NumKeys,
+    DiskSpace,
 }
 
 fn setup_tracing() {
@@ -79,11 +106,22 @@ fn main() -> Result<()> {
     setup_tracing();
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Inspect) => {
-            println!("Inspecting");
-        }
-        None => {
-            run(cli)?;
+        Command::Inspect {
+            command,
+            meta_root,
+            metadata_db,
+        } => match command {
+            InspectCommand::NumKeys => {
+                let num_keys = num_keys(meta_root, metadata_db)?;
+                println!("Number of keys: {}", num_keys);
+            }
+            InspectCommand::DiskSpace => {
+                let disk_space = disk_space(meta_root, metadata_db);
+                println!("Disk space: {}", disk_space);
+            }
+        },
+        Command::Server(config) => {
+            run(config)?;
         }
     }
     Ok(())
@@ -94,7 +132,7 @@ use hyper_util::server::conn::auto::Builder as ConnBuilder;
 use s3s::service::S3ServiceBuilder;
 
 #[tokio::main]
-async fn run(args: Cli) -> anyhow::Result<()> {
+async fn run(args: ServerConfig) -> anyhow::Result<()> {
     let storage_engine = args.metadata_db;
 
     // provider

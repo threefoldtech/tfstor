@@ -29,7 +29,7 @@ impl std::fmt::Debug for FjallStoreNotx {
 
 impl FjallStoreNotx {
     pub fn new(path: PathBuf, inlined_metadata_size: Option<usize>) -> Self {
-        tracing::info!("Opening fjall store at {:?}", path);
+        tracing::debug!("Opening fjall store at {:?}", path);
         const BUCKET_META_PARTITION: &str = "_BUCKETS";
         const BLOCK_PARTITION: &str = "_BLOCKS";
         const PATH_PARTITION: &str = "_PATHS";
