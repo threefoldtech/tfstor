@@ -333,8 +333,8 @@ impl S3 for S3FS {
 
         // load metadata
 
-        let (obj_meta, blocks) = match self.casfs.get_object_blocks(&bucket, &key) {
-            Ok(Some((obj_meta, blocks))) => (obj_meta, blocks),
+        let (obj_meta, paths) = match self.casfs.get_object_paths(&bucket, &key) {
+            Ok(Some((obj_meta, paths))) => (obj_meta, paths),
             Ok(None) => {
                 return Err(s3_error!(NoSuchKey, "Object does not exist"));
             }
@@ -372,13 +372,7 @@ impl S3 for S3FS {
             None => RangeRequest::All,
         };
 
-        // load the data
-        let mut paths = Vec::with_capacity(blocks.len());
-        let mut block_size = 0;
-        for block in blocks {
-            block_size += block.size();
-            paths.push((block.disk_path(self.casfs.fs_root().clone()), block.size()));
-        }
+        let block_size: usize = paths.iter().map(|(_, size)| size).sum();
 
         debug_assert!(obj_meta.size() as usize == block_size);
         let block_stream = BlockStream::new(paths, block_size, range, self.metrics.clone());

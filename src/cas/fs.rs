@@ -115,6 +115,8 @@ impl FromStr for StorageEngine {
     }
 }
 
+pub type ObjectPaths = (Object, Vec<(PathBuf, usize)>);
+
 impl CasFS {
     pub fn new(
         mut root: PathBuf,
@@ -204,11 +206,11 @@ impl CasFS {
         self.meta_store.get_meta(bucket_name, key)
     }
 
-    pub fn get_object_blocks(
+    pub fn get_object_paths(
         &self,
         bucket_name: &str,
         key: &str,
-    ) -> Result<Option<(Object, Vec<crate::metastore::Block>)>, MetaError> {
+    ) -> Result<Option<ObjectPaths>, MetaError> {
         let obj_meta = self.get_object_meta(bucket_name, key)?;
         let Some(obj_meta) = obj_meta else {
             return Ok(None);
@@ -219,14 +221,17 @@ impl CasFS {
         } else {
             let blocks = obj_meta.blocks();
             let block_map = self.block_tree()?;
-            let mut block_vec = Vec::with_capacity(blocks.len());
+            let mut paths = Vec::with_capacity(blocks.len());
             for block in blocks {
                 let block_meta = block_map
                     .get_block(block)?
                     .ok_or(MetaError::BlockNotFound)?;
-                block_vec.push(block_meta);
+                paths.push((
+                    block_meta.disk_path(self.fs_root().clone()),
+                    block_meta.size(),
+                ));
             }
-            Ok(Some((obj_meta, block_vec)))
+            Ok(Some((obj_meta, paths)))
         }
     }
 

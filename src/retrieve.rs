@@ -39,11 +39,6 @@ pub struct RetrieveConfig {
 
 #[tokio::main]
 pub async fn retrieve(args: RetrieveConfig) -> Result<()> {
-    tracing::info!(
-        "Retrieving object from bucket: {}, key: {}",
-        args.bucket,
-        args.key
-    );
     let storage_engine = args.metadata_db;
     let metrics = SharedMetrics::new();
     let casfs = CasFS::new(
@@ -55,42 +50,31 @@ pub async fn retrieve(args: RetrieveConfig) -> Result<()> {
         None,
     );
 
-    tracing::info!("get_object_blocks");
-    let (obj_meta, blocks) = match casfs.get_object_blocks(&args.bucket, &args.key)? {
-        Some((obj, blocks)) => (obj, blocks),
+    let (obj_meta, paths) = match casfs.get_object_paths(&args.bucket, &args.key)? {
+        Some((obj, paths)) => (obj, paths),
         None => {
-            println!("Object not found");
+            eprintln!("Object not found");
             return Ok(());
         }
     };
 
-    tracing::info!("Object found, size: {}", obj_meta.size());
     if let Some(data) = obj_meta.inlined() {
         let mut file = tokio::fs::File::create(&args.dest).await?;
         file.write_all(data).await?;
         return Ok(());
     }
 
-    let mut paths = Vec::with_capacity(blocks.len());
-    let mut block_size = 0;
-    for block in blocks {
-        block_size += block.size();
-        paths.push((block.disk_path(casfs.fs_root().clone()), block.size()));
-        tracing::info!("block path: {:?}", block.disk_path(casfs.fs_root().clone()));
-    }
+    let block_size: usize = paths.iter().map(|(_, size)| size).sum();
 
     debug_assert!(obj_meta.size() as usize == block_size);
-    tracing::info!("creating block stream");
     let mut block_stream = BlockStream::new(paths, block_size, RangeRequest::All, metrics);
 
     // Create the destination file
-    tracing::info!("creating destination file: {}", args.dest);
     let mut file = tokio::fs::File::create(&args.dest).await?;
 
     // Read from block stream and write to file
     while let Some(chunk_result) = block_stream.next().await {
         let chunk: Bytes = chunk_result?;
-        tracing::info!("writing chunk of size: {}", chunk.len());
         file.write_all(&chunk).await?;
     }
 
