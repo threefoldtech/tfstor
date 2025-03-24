@@ -18,6 +18,12 @@ cd s3-cas
 cargo build --release --features binary
 ```
 
+## Running
+
+```console
+s3-cas server --access-key=MY_KEY --secret-key=MY_SECRET --fs-root=/tmp/s3/fs --meta-root=/tmp/s3/meta
+```
+
 ## Inline metadata
 
 Objects smaller than or equal to a configurable threshold can be stored directly in their metadata records,

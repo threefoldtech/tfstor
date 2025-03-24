@@ -11,6 +11,7 @@ use tracing_subscriber::FmtSubscriber;
 use s3_cas::cas::{CasFS, StorageEngine};
 use s3_cas::inspect::{disk_space, num_keys};
 use s3_cas::metastore::Durability;
+use s3_cas::retrieve::{retrieve, RetrieveConfig};
 
 #[derive(Parser)]
 #[command(version)]
@@ -81,6 +82,8 @@ pub enum Command {
         command: InspectCommand,
     },
 
+    Retrieve(RetrieveConfig),
+
     /// Start S3-cas server
     Server(ServerConfig),
 }
@@ -120,6 +123,7 @@ fn main() -> Result<()> {
                 println!("Disk space: {}", disk_space);
             }
         },
+        Command::Retrieve(config) => retrieve(config)?,
         Command::Server(config) => {
             run(config)?;
         }

@@ -155,6 +155,10 @@ impl CasFS {
         self.meta_store.get_path_tree()
     }
 
+    pub fn fs_root(&self) -> &PathBuf {
+        &self.root
+    }
+
     pub fn max_inlined_data_length(&self) -> usize {
         self.meta_store.max_inlined_data_length()
     }

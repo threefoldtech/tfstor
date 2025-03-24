@@ -5,4 +5,5 @@ pub mod cas;
 pub mod inspect;
 pub mod metastore;
 pub mod metrics;
+pub mod retrieve;
 pub mod s3fs;
