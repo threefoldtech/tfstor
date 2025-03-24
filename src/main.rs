@@ -9,6 +9,7 @@ use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use s3_cas::cas::{CasFS, StorageEngine};
+use s3_cas::check::{check_integrity, CheckConfig};
 use s3_cas::inspect::{disk_space, num_keys};
 use s3_cas::metastore::Durability;
 use s3_cas::retrieve::{retrieve, RetrieveConfig};
@@ -82,7 +83,11 @@ pub enum Command {
         command: InspectCommand,
     },
 
+    /// retrieve an object
     Retrieve(RetrieveConfig),
+
+    /// Check object integrity
+    Check(CheckConfig),
 
     /// Start S3-cas server
     Server(ServerConfig),
@@ -124,6 +129,7 @@ fn main() -> Result<()> {
             }
         },
         Command::Retrieve(config) => retrieve(config)?,
+        Command::Check(config) => check_integrity(config)?,
         Command::Server(config) => {
             run(config)?;
         }
