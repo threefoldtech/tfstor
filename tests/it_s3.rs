@@ -87,7 +87,7 @@ static CONFIG: Lazy<SdkConfig> = Lazy::new(|| {
         inlined_size,
         None,
     );
-    let s3fs = s3_cas::s3fs::S3FS::new(FS_ROOT.into(), FS_ROOT.into(), casfs, metrics.clone());
+    let s3fs = s3_cas::s3fs::S3FS::new(casfs, metrics.clone());
 
     // Setup S3 service
     let service = {

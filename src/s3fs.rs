@@ -1,5 +1,4 @@
 use std::io::{self, ErrorKind};
-use std::path::PathBuf;
 
 use bytes::Bytes;
 use faster_hex::{hex_decode, hex_string};
@@ -36,32 +35,18 @@ const MAX_KEYS: i32 = 1000;
 
 #[derive(Debug)]
 pub struct S3FS {
-    root: PathBuf,
     casfs: CasFS,
     metrics: SharedMetrics,
 }
 
 use crate::cas::range_request::RangeRequest;
 impl S3FS {
-    pub fn new(
-        mut root: PathBuf,
-        mut meta_path: PathBuf,
-        casfs: CasFS,
-        metrics: SharedMetrics,
-    ) -> Self {
-        meta_path.push("db");
-        root.push("blocks");
-
-        //let db = sled::open(meta_path).unwrap();
+    pub fn new(casfs: CasFS, metrics: SharedMetrics) -> Self {
         // Get the current amount of buckets
         // FIXME: This is a bit of a hack, we should have a better way to get the amount of buckets
         metrics.set_bucket_count(1); //db.open_tree(BUCKET_META_TREE).unwrap().len());
 
-        Self {
-            root,
-            casfs,
-            metrics,
-        }
+        Self { casfs, metrics }
     }
 
     // Compute the e_tag of the multpart upload. Per the S3 standard (according to minio), the
@@ -392,7 +377,7 @@ impl S3 for S3FS {
         let mut block_size = 0;
         for block in blocks {
             block_size += block.size();
-            paths.push((block.disk_path(self.root.clone()), block.size()));
+            paths.push((block.disk_path(self.casfs.fs_root().clone()), block.size()));
         }
 
         debug_assert!(obj_meta.size() as usize == block_size);

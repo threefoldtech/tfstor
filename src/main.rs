@@ -149,7 +149,7 @@ async fn run(args: ServerConfig) -> anyhow::Result<()> {
         args.inline_metadata_size,
         Some(args.durability),
     );
-    let s3fs = s3_cas::s3fs::S3FS::new(args.fs_root, args.meta_root, casfs, metrics.clone());
+    let s3fs = s3_cas::s3fs::S3FS::new(casfs, metrics.clone());
     let s3fs = s3_cas::metrics::MetricFs::new(s3fs, metrics.clone());
 
     // Setup S3 service
