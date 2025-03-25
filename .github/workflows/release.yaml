@@ -1,51 +1,104 @@
-name: Release
-
-permissions:
-  contents: write
+name: Create Release
 
 on:
   push:
     tags:
-      - v[0-9]+.*
+      - 'v*'
 
 jobs:
-  create-release:
+  build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/create-gh-release-action@v1
+      
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
         with:
-          # (required) GitHub token for creating GitHub Releases.
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-assets:
-    needs: create-release
-    strategy:
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            features: vendored
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            features: vendored,asm
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            features: vendored,asm
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            features: vendored
-    runs-on: ${{ matrix.os }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          
+      - name: Install latest stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          
+      - name: Build release
+        run: cargo build --release
+        
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-cas-linux
+          path: target/release/s3-cas
+          
+  build-macos:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/upload-rust-binary-action@v1
+      
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
         with:
-          # Name of the compiled binary, also name of the non-extension part of the produced file
-          bin: s3-cas
-          # --target flag value, default is host
-          target: ${{ matrix.target }}
-          # Name of the archive when uploaded
-          archive: $bin-$target
-          # (required) GitHub token for uploading assets to GitHub Releases.
-          token: ${{ secrets.GITHUB_TOKEN }}
-          features: ${{ matrix.features }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          
+      - name: Install latest stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          
+      - name: Build release
+        run: cargo build --release
+        
+      - name: Upload macOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-cas-macos
+          path: target/release/s3-cas
+          
+  create-release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          
+      - name: List directories
+        run: |
+          ls -la
+          ls -la artifacts
+          ls -la artifacts/s3-cas-linux || echo "Linux directory not found"
+          ls -la artifacts/s3-cas-macos || echo "macOS directory not found"
+        
+      - name: Rename binaries to include platform
+        run: |
+          if [ -f "artifacts/s3-cas-linux/s3-cas" ]; then
+            mv artifacts/s3-cas-linux/s3-cas artifacts/s3-cas-linux/s3-cas-linux
+          fi
+          if [ -f "artifacts/s3-cas-macos/s3-cas" ]; then
+            mv artifacts/s3-cas-macos/s3-cas artifacts/s3-cas-macos/s3-cas-macos
+          fi
+        
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/s3-cas-linux/s3-cas-linux
+            artifacts/s3-cas-macos/s3-cas-macos
