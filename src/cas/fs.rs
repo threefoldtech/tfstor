@@ -99,7 +99,11 @@ pub struct CasFS {
 
 #[derive(Debug, Clone, Copy)]
 pub enum StorageEngine {
+    // fjall with transactions support
     Fjall,
+
+    // fjall without transactions support.
+    // we implement the rollback logic in our own code
     FjallNotx,
 }
 
