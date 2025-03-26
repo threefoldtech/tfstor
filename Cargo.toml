@@ -57,3 +57,10 @@ once_cell = "1.20.2"
 tempfile = "3"
 log = "0.4.14"
 env_logger = "0.11.6"
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.8"
+
+[[bench]]
+name = "fjall_benchmark"
+harness = false
+path = "benches/fjall_benchmark.rs"
