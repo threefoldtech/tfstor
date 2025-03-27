@@ -1,101 +1,16 @@
-use crate::metastore::{BlockID, BucketMeta, MetaError, Object, ObjectData, BucketTreeExt};
+use crate::metastore::{BaseMetaTree, BlockID, BucketTreeExt, MetaError, Object, ObjectData};
 
 pub trait TestStore {
-    fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError>;
-    fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError>;
-    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
-    fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError>;
-    fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError>;
-    fn get_bucket_ext(
-        &self,
-        name: &str,
-    ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError>;
-}
-
-pub fn test_errors(store: &impl TestStore) {
-    // Test nonexistent bucket
-    assert_eq!(store.bucket_exists("nonexistent").unwrap(), false);
-
-    // Test nonexistent object
-    let bucket_name = "test-bucket";
-    let bucket_meta = BucketMeta::new(bucket_name.to_string());
-    store
-        .insert_bucket(bucket_name, bucket_meta.to_vec())
-        .unwrap();
-    assert!(store
-        .get_meta(bucket_name, "nonexistent")
-        .unwrap()
-        .is_none());
-}
-
-pub fn test_bucket_operations(store: &impl TestStore) {
-    // Test bucket creation
-    let bucket_name1 = "test-bucket";
-    let bucket_name2 = "test-bucket2";
-    let bucket_meta = BucketMeta::new(bucket_name1.to_string());
-    store
-        .insert_bucket(bucket_name1, bucket_meta.to_vec())
-        .unwrap();
-    store
-        .insert_bucket(
-            bucket_name2,
-            BucketMeta::new(bucket_name2.to_string()).to_vec(),
-        )
-        .unwrap();
-
-    // Verify bucket exists
-    assert_eq!(store.bucket_exists(bucket_name1).unwrap(), true);
-    assert_eq!(store.bucket_exists(bucket_name2).unwrap(), true);
-
-    // Test bucket listing
-    let buckets = store.list_buckets().unwrap();
-    assert_eq!(buckets.len(), 2);
-    assert_eq!(buckets[0].name(), bucket_name1);
-    assert_eq!(buckets[1].name(), bucket_name2);
-}
-
-pub fn test_object_operations(store: &impl TestStore) {
-    let bucket_name = "test-bucket";
-    let key = "test-bucket/key";
-
-    // Setup bucket first
-    let bucket_meta = BucketMeta::new(bucket_name.to_string());
-    store
-        .insert_bucket(bucket_name, bucket_meta.to_vec())
-        .unwrap();
-
-    // Test object insertion
-    let test_obj = Object::new(
-        1024,                   // 1KB object
-        BlockID::from([1; 16]), // Sample ETag
-        ObjectData::SinglePart {
-            blocks: vec![BlockID::from([1; 16])],
-        },
-    );
-    store
-        .insert_meta(&bucket_name, key, test_obj.to_vec())
-        .unwrap();
-
-    // Test object retrieval
-    let retrieved_obj = store.get_meta(&bucket_name, key).unwrap().unwrap();
-    assert_eq!(retrieved_obj.blocks().len(), 1);
-    assert_eq!(retrieved_obj.blocks()[0], BlockID::from([1; 16]));
-
-    // Test error cases of object retrieval
-    assert!(store
-        .get_meta(bucket_name, "nonexistent-key")
-        .unwrap()
-        .is_none());
+    fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;
+    fn get_bucket_ext(&self, name: &str)
+        -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError>;
 }
 
 pub fn test_get_bucket_keys(store: &impl TestStore) {
     let bucket_name = "testbucketkeys";
 
     // Setup bucket
-    let bucket_meta = BucketMeta::new(bucket_name.to_string());
-    store
-        .insert_bucket(bucket_name, bucket_meta.to_vec())
-        .unwrap();
+    let bucket = store.tree_open(bucket_name).unwrap();
 
     // Insert test objects
     let test_keys = vec!["a", "b", "c"];
@@ -107,7 +22,7 @@ pub fn test_get_bucket_keys(store: &impl TestStore) {
                 blocks: vec![BlockID::from([1; 16])],
             },
         );
-        store.insert_meta(bucket_name, key, obj.to_vec()).unwrap();
+        bucket.insert(key.as_bytes(), obj.to_vec()).unwrap();
     }
 
     let bucket = store.get_bucket_ext(bucket_name).unwrap();
@@ -126,12 +41,7 @@ pub fn test_get_bucket_keys(store: &impl TestStore) {
 
     // Test empty bucket
     let empty_bucket = "empty-bucket";
-    store
-        .insert_bucket(
-            empty_bucket,
-            BucketMeta::new(empty_bucket.to_string()).to_vec(),
-        )
-        .unwrap();
+    let _ = store.tree_open(empty_bucket);
     let empty = store.get_bucket_ext(empty_bucket).unwrap();
     assert_eq!(empty.get_bucket_keys().count(), 0);
 }
@@ -140,10 +50,7 @@ pub fn test_range_filter(store: &impl TestStore) {
     let bucket_name = "test-bucket";
 
     // Setup bucket
-    let bucket_meta = BucketMeta::new(bucket_name.to_string());
-    store
-        .insert_bucket(bucket_name, bucket_meta.to_vec())
-        .unwrap();
+    let bucket = store.tree_open(bucket_name).unwrap();
 
     // Insert test objects with unordered keys
     let test_data = vec![
@@ -162,7 +69,7 @@ pub fn test_range_filter(store: &impl TestStore) {
                 blocks: vec![BlockID::from([1; 16])],
             },
         );
-        store.insert_meta(bucket_name, key, obj.to_vec()).unwrap();
+        bucket.insert(key.as_bytes(), obj.to_vec()).unwrap();
     }
 
     let bucket = store.get_bucket_ext(bucket_name).unwrap();

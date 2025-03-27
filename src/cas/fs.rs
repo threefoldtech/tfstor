@@ -91,7 +91,7 @@ impl AsyncFileSystem for RealAsyncFs {
 #[derive(Debug)]
 pub struct CasFS {
     async_fs: Box<dyn AsyncFileSystem>,
-    meta_store: Box<dyn MetaStore>,
+    meta_store: MetaStore,
     root: PathBuf,
     metrics: SharedMetrics,
     multipart_tree: Arc<MultiPartTree>,
@@ -132,16 +132,17 @@ impl CasFS {
     ) -> Self {
         meta_path.push("db");
         root.push("blocks");
-        let meta_store: Box<dyn MetaStore> = match storage_engine {
-            StorageEngine::Fjall => Box::new(FjallStore::new(
-                meta_path,
-                inlined_metadata_size,
-                durability,
-            )),
+        let meta_store = match storage_engine {
+            StorageEngine::Fjall => {
+                let store = FjallStore::new(meta_path, inlined_metadata_size, durability);
+                MetaStore::new(store, inlined_metadata_size)
+            }
             StorageEngine::FjallNotx => {
-                Box::new(FjallStoreNotx::new(meta_path, inlined_metadata_size))
+                let store = FjallStoreNotx::new(meta_path, inlined_metadata_size);
+                MetaStore::new(store, inlined_metadata_size)
             }
         };
+        //let meta_store = MetaStore::new(store, inlined_metadata_size);
 
         // Get the current amount of buckets
         //metrics.set_bucket_count(db.open_tree(BUCKET_META_TREE).unwrap().len());
@@ -177,7 +178,7 @@ impl CasFS {
     }
 
     /// Open the tree containing the block map.
-    pub fn block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError> {
+    pub fn block_tree(&self) -> Result<BlockTree, MetaError> {
         self.meta_store.get_block_tree()
     }
 

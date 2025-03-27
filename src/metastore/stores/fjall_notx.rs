@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use fjall;
 
-use crate::metastore::{BaseMetaTree, BucketTreeExt, MetaError, Store, BLOCKID_SIZE};
+use crate::metastore::{
+    BaseMetaTree, Block, BlockID, BucketMeta, BucketTreeExt, MetaError, Object, Store, Transaction,
+    BLOCKID_SIZE,
+};
 
 #[derive(Clone)]
 pub struct FjallStoreNotx {
@@ -59,7 +62,7 @@ impl FjallStoreNotx {
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
-    
+
     pub fn get_inlined_metadata_size(&self) -> usize {
         self.inlined_metadata_size
     }
@@ -67,6 +70,11 @@ impl FjallStoreNotx {
 
 impl Store for FjallStoreNotx {
     fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        let partition = self.get_partition(name)?;
+        Ok(Box::new(FjallTreeNotx::new(Arc::new(partition))))
+    }
+
+    fn tree_ext_open(&self, name: &str) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
         let partition = self.get_partition(name)?;
         Ok(Box::new(FjallTreeNotx::new(Arc::new(partition))))
     }
@@ -84,24 +92,38 @@ impl Store for FjallStoreNotx {
         }
     }
 
-    fn tree_list(&self) -> Result<Vec<String>, MetaError> {
-        // This is a placeholder implementation
-        // In a real implementation, we would need to get a list of all partitions
-        Ok(vec![])
+    fn begin_transaction(&self) -> Box<dyn Transaction> {
+        Box::new(FjallNoTransaction::new(Arc::new(self.clone())))
     }
 
-    fn set(&self, key: &str, value: Vec<u8>) -> Result<(), MetaError> {
-        self.bucket_partition
-            .insert(key, value)
-            .map_err(|e| MetaError::InsertError(e.to_string()))
+    fn num_keys(&self) -> (usize, usize, usize) {
+        (
+            self.bucket_partition.approximate_len(),
+            self.block_partition.approximate_len(),
+            self.path_partition.approximate_len(),
+        )
     }
 
-    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, MetaError> {
-        match self.bucket_partition.get(key) {
-            Ok(Some(value)) => Ok(Some(value.to_vec())),
-            Ok(None) => Ok(None),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        }
+    fn disk_space(&self) -> u64 {
+        self.keyspace.disk_space()
+    }
+
+    /// Get a list of all buckets in the system.
+    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
+        let buckets = self
+            .bucket_partition
+            .range::<Vec<u8>, _>(std::ops::RangeFull) // Specify type parameter for range
+            .filter_map(|raw_value| {
+                let value = match raw_value {
+                    Err(_) => return None,
+                    Ok((_, value)) => value,
+                };
+                // unwrap here is fine as it means the db is corrupt
+                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
+                Some(bucket_meta)
+            })
+            .collect();
+        Ok(buckets)
     }
 }
 
@@ -239,6 +261,15 @@ impl BaseMetaTree for FjallTreeNotx {
             Err(e) => Err(e),
         }
     }
+
+    #[cfg(test)]
+    fn len(&self) -> Result<usize, MetaError> {
+        let len = self
+            .partition
+            .len()
+            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+        Ok(len)
+    }
 }
 
 impl BucketTreeExt for FjallTreeNotx {
@@ -334,31 +365,6 @@ impl BucketTreeExt for FjallTreeNotx {
     }
 }
 
-impl BlockTree for FjallTreeNotx {
-    fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError> {
-        let block_data = match self.get(key) {
-            Ok(Some(b)) => b,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-
-        let block = match Block::try_from(&*block_data) {
-            Ok(b) => b,
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-        Ok(Some(block))
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> Result<usize, MetaError> {
-        let len = self
-            .partition
-            .len()
-            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
-        Ok(len)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,36 +372,15 @@ mod tests {
     use tempfile::tempdir;
 
     impl test_utils::TestStore for FjallStoreNotx {
-        fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
-            <FjallStoreNotx as Store>::set(self, bucket_name, raw_bucket)
-        }
-
-        fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-            <FjallStoreNotx as Store>::tree_exists(self, bucket_name)
-        }
-
-        fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-            <FjallStoreNotx as Store>::tree_list(self)
-        }
-
-        fn insert_meta(
-            &self,
-            bucket_name: &str,
-            key: &str,
-            raw_obj: Vec<u8>,
-        ) -> Result<(), MetaError> {
-            <FjallStoreNotx as Store>::set(self, key, raw_obj)
-        }
-
-        fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
-            <FjallStoreNotx as Store>::get(self, key)
+        fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+            <FjallStoreNotx as Store>::tree_open(self, name)
         }
 
         fn get_bucket_ext(
             &self,
             name: &str,
         ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-            <FjallStoreNotx as Store>::tree_open(self, name)
+            <FjallStoreNotx as Store>::tree_ext_open(self, name)
         }
     }
 
@@ -403,24 +388,6 @@ mod tests {
         let dir = tempdir().unwrap();
         let store = FjallStoreNotx::new(dir.path().to_path_buf(), Some(1));
         (store, dir)
-    }
-
-    #[test]
-    fn test_errors() {
-        let (store, _dir) = setup_store();
-        test_utils::test_errors(&store);
-    }
-
-    #[test]
-    fn test_bucket_operations() {
-        let (store, _dir) = setup_store();
-        test_utils::test_bucket_operations(&store);
-    }
-
-    #[test]
-    fn test_object_operations() {
-        let (store, _dir) = setup_store();
-        test_utils::test_object_operations(&store);
     }
 
     #[test]

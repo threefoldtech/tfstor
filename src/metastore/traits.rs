@@ -1,13 +1,14 @@
+use std::convert::TryFrom;
+use std::fmt::Debug;
+use std::str::FromStr;
+use std::sync::Arc;
+
 use super::{
     block::{Block, BlockID},
     bucket_meta::BucketMeta,
     object::Object,
     MetaError,
 };
-
-use std::fmt::Debug;
-use std::str::FromStr;
-use std::sync::Arc;
 
 /// MetaStore is a struct that provides methods to interact with the metadata store.
 ///
@@ -69,24 +70,26 @@ impl MetaStore {
     /// returns tree which contains all the buckets.
     /// This tree is used to store the bucket lists and provide
     /// the CRUD for the bucket list.
-    pub fn get_allbuckets_tree(&self) -> Result<Box<dyn AllBucketsTree>, MetaError> {
-        self.ensure_tree_exists(&self.bucket_tree_name)?;
-        self.store.tree_open(&self.bucket_tree_name)
+    pub fn get_allbuckets_tree(&self) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+        self.store.tree_ext_open(&self.bucket_tree_name)
     }
 
     /// get_bucket_ext returns the tree for specific bucket with the extended methods
     /// we use this tree to provide additional methods for the bucket like the range and list methods.
-    pub fn get_bucket_ext(&self, name: &str)
-        -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+    pub fn get_bucket_ext(
+        &self,
+        name: &str,
+    ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
         self.ensure_tree_exists(name)?;
-        self.store.tree_open(name)
+        self.store.tree_ext_open(name)
     }
 
     /// get_block_tree returns the block meta tree.
     /// This tree is used to store the data block metadata.
-    pub fn get_block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError> {
+    pub fn get_block_tree(&self) -> Result<BlockTree, MetaError> {
         self.ensure_tree_exists(&self.block_tree_name)?;
-        self.store.tree_open(&self.block_tree_name)
+        let tree = self.store.tree_open(&self.block_tree_name)?;
+        Ok(BlockTree { tree })
     }
 
     /// get_tree returns the tree with the given name.
@@ -120,11 +123,11 @@ impl MetaStore {
     /// insert_bucket inserts raw representation of the bucket into the meta store.
     pub fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
         // Insert the bucket metadata into the buckets tree
-        self.ensure_tree_exists(&self.bucket_tree_name)?;
-        self.store.set(bucket_name, raw_bucket)?;
+        let buckets = self.store.tree_open(&self.bucket_tree_name)?;
+        buckets.insert(bucket_name.as_bytes(), raw_bucket)?;
 
         // Create the bucket tree if it doesn't exist
-        self.ensure_tree_exists(bucket_name)?;
+        self.store.tree_open(bucket_name)?;
 
         Ok(())
     }
@@ -132,7 +135,7 @@ impl MetaStore {
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        let bucket_tree = self.get_allbuckets_tree()?;
+        /*let bucket_tree = self.get_allbuckets_tree()?;
         let buckets = bucket_tree
             .get_bucket_keys()
             .filter_map(|result| {
@@ -140,21 +143,27 @@ impl MetaStore {
                     Ok(k) => k,
                     Err(_) => return None,
                 };
-                
+
                 let value = match self.store.get(std::str::from_utf8(&key).unwrap()) {
                     Ok(Some(v)) => v,
                     _ => return None,
                 };
-                
+
                 let bucket_meta = BucketMeta::try_from(&*value).ok()?;
                 Some(bucket_meta)
             })
             .collect();
-        Ok(buckets)
+        Ok(buckets)*/
+        self.store.list_buckets()
     }
 
     /// insert_meta inserts a metadata Object into the bucket
-    pub fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
+    pub fn insert_meta(
+        &self,
+        bucket_name: &str,
+        key: &str,
+        raw_obj: Vec<u8>,
+    ) -> Result<(), MetaError> {
         let bucket = self.get_bucket_ext(bucket_name)?;
         bucket.insert(key.as_bytes(), raw_obj)
     }
@@ -202,7 +211,7 @@ impl MetaStore {
             match block_tree.get(block_id)? {
                 Some(block_data) => {
                     let mut block = Block::try_from(&*block_data).expect("Corrupted block data");
-                    
+
                     // If this is the last reference to the block, delete it
                     if block.rc() == 1 {
                         block_tree.remove(block_id)?;
@@ -221,24 +230,17 @@ impl MetaStore {
     }
 
     pub fn begin_transaction(&self) -> Box<dyn Transaction> {
-        // This is a placeholder implementation
-        // In a real implementation, we would need to create a transaction object
-        // that can be used to perform operations atomically
-        unimplemented!("Transaction support not implemented for MetaStore")
+        self.store.begin_transaction()
     }
 
     // returns the number of keys of the bucket, block, and path trees.
     pub fn num_keys(&self) -> (usize, usize, usize) {
-        // This is a placeholder implementation
-        // In a real implementation, we would need to count the number of keys in each tree
-        (0, 0, 0)
+        self.store.num_keys()
     }
 
     // returns the disk space used by the metadata store.
     pub fn disk_space(&self) -> u64 {
-        // This is a placeholder implementation
-        // In a real implementation, we would need to calculate the disk space used by the store
-        0
+        self.store.disk_space()
     }
 }
 
@@ -275,18 +277,43 @@ pub trait BaseMetaTree: Send + Sync {
     fn contains_key(&self, key: &[u8]) -> Result<bool, MetaError>;
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError>;
-}
-
-pub trait AllBucketsTree: BaseMetaTree {}
-
-impl<T: BaseMetaTree> AllBucketsTree for T {}
-
-pub trait BlockTree: Send + Sync {
-    /// get_block_obj returns the `Object` for the given key.
-    fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError>;
 
     #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError>;
+}
+
+pub struct BlockTree {
+    tree: Box<dyn BaseMetaTree>,
+}
+
+impl BlockTree {
+    /// get_block_obj returns the `Object` for the given key.
+    pub fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError> {
+        match self.tree.get(key)? {
+            Some(data) => {
+                let block = Block::try_from(&*data).expect("Malformed block");
+                Ok(Some(block))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> Result<usize, MetaError> {
+        self.tree.len()
+    }
+
+    fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
+        self.tree.remove(key)
+    }
+
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
+        self.tree.insert(key, value)
+    }
+
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError> {
+        self.tree.get(key)
+    }
 }
 
 pub trait BucketTreeExt: BaseMetaTree {
@@ -307,20 +334,21 @@ pub trait Store: Send + Sync + Debug + 'static {
     // creates the tree if it doesn't exist
     fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
+    fn tree_ext_open(&self, name: &str) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError>;
+
     // check if the tree exists
     fn tree_exists(&self, name: &str) -> Result<bool, MetaError>;
 
     // delete the tree with the given name
     fn tree_delete(&self, name: &str) -> Result<(), MetaError>;
 
-    // list all the trees
-    fn tree_list(&self) -> Result<Vec<String>, MetaError>;
+    fn begin_transaction(&self) -> Box<dyn Transaction>;
 
-    // set a key value pair in the store
-    fn set(&self, key: &str, value: Vec<u8>) -> Result<(), MetaError>;
+    fn num_keys(&self) -> (usize, usize, usize);
 
-    // get the value for the given key
-    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, MetaError>;
+    fn disk_space(&self) -> u64;
+
+    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
 }
 
 #[derive(Debug, Clone, Copy)]

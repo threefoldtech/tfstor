@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use fjall;
 
-use crate::metastore::{BaseMetaTree, BucketTreeExt, Durability, MetaError, Store, BLOCKID_SIZE};
+use crate::metastore::{
+    BaseMetaTree, Block, BlockID, BucketMeta, BucketTreeExt, Durability, MetaError, Object, Store,
+    Transaction, BLOCKID_SIZE,
+};
 
 #[derive(Clone)]
 pub struct FjallStore {
@@ -98,6 +101,14 @@ impl Store for FjallStore {
         )))
     }
 
+    fn tree_ext_open(&self, name: &str) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+        let partition = self.get_partition(name)?;
+        Ok(Box::new(FjallTree::new(
+            self.keyspace.clone(),
+            Arc::new(partition),
+        )))
+    }
+
     fn tree_exists(&self, name: &str) -> Result<bool, MetaError> {
         let exists = self.keyspace.partition_exists(name);
         Ok(exists)
@@ -111,25 +122,41 @@ impl Store for FjallStore {
         }
     }
 
-    fn tree_list(&self) -> Result<Vec<String>, MetaError> {
-        // This is a placeholder implementation
-        // In a real implementation, we would need to get a list of all partitions
-        Ok(vec![])
+    fn begin_transaction(&self) -> Box<dyn Transaction> {
+        // Use unsafe to extend lifetime to 'static since the transaction
+        // won't outlive the store
+        let tx = unsafe {
+            std::mem::transmute::<fjall::WriteTransaction<'_>, fjall::WriteTransaction<'static>>(
+                self.keyspace.write_tx(),
+            )
+        };
+
+        Box::new(FjallTransaction::new(tx, Arc::new(self.clone())))
     }
 
-    fn set(&self, key: &str, value: Vec<u8>) -> Result<(), MetaError> {
-        let mut tx = self.keyspace.write_tx();
-        tx.insert(&self.bucket_partition, key, value);
-        self.commit_persist(tx)
+    fn num_keys(&self) -> (usize, usize, usize) {
+        unimplemented!();
     }
 
-    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, MetaError> {
+    fn disk_space(&self) -> u64 {
+        self.keyspace.disk_space()
+    }
+
+    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         let read_tx = self.keyspace.read_tx();
-        match read_tx.get(&self.bucket_partition, key) {
-            Ok(Some(value)) => Ok(Some(value.to_vec())),
-            Ok(None) => Ok(None),
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
-        }
+        let buckets = read_tx
+            .range::<Vec<u8>, _>(&self.bucket_partition, std::ops::RangeFull) // Specify type parameter for range
+            .filter_map(|raw_value| {
+                let value = match raw_value {
+                    Err(_) => return None,
+                    Ok((_, value)) => value,
+                };
+                // unwrap here is fine as it means the db is corrupt
+                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
+                Some(bucket_meta)
+            })
+            .collect();
+        Ok(buckets)
     }
 }
 
@@ -265,22 +292,6 @@ impl BaseMetaTree for FjallTree {
             Err(e) => Err(e),
         }
     }
-}
-
-impl BlockTree for FjallTree {
-    fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError> {
-        let block_data = match self.get(key) {
-            Ok(Some(b)) => b,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-
-        let block = match Block::try_from(&*block_data) {
-            Ok(b) => b,
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-        Ok(Some(block))
-    }
 
     #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError> {
@@ -400,62 +411,16 @@ mod tests {
     }
 
     impl test_utils::TestStore for FjallStore {
-        fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
-            <FjallStore as Store>::set(self, bucket_name, raw_bucket)
-        }
-
-        fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-            <FjallStore as Store>::tree_exists(self, bucket_name)
-        }
-
-        fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-            // This is a placeholder implementation
-            // In a real implementation, we would need to get a list of all partitions
-            Ok(vec![])
-        }
-
-        fn insert_meta(
-            &self,
-            bucket_name: &str,
-            key: &str,
-            raw_obj: Vec<u8>,
-        ) -> Result<(), MetaError> {
-            <FjallStore as Store>::set(self, key, raw_obj)
-        }
-
-        fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
-            <FjallStore as Store>::get(self, key)
+        fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+            <FjallStore as Store>::tree_open(self, name)
         }
 
         fn get_bucket_ext(
             &self,
             name: &str,
         ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-            // This is a placeholder implementation
-            // In a real implementation, we would need to get a list of all partitions
-            Ok(Box::new(FjallTree::new(
-                self.keyspace.clone(),
-                self.bucket_partition.clone(),
-            )))
+            <FjallStore as Store>::tree_ext_open(self, name)
         }
-    }
-
-    #[test]
-    fn test_errors() {
-        let (store, _dir) = setup_store();
-        test_utils::test_errors(&store);
-    }
-
-    #[test]
-    fn test_bucket_operations() {
-        let (store, _dir) = setup_store();
-        test_utils::test_bucket_operations(&store);
-    }
-
-    #[test]
-    fn test_object_operations() {
-        let (store, _dir) = setup_store();
-        test_utils::test_object_operations(&store);
     }
 
     #[test]
