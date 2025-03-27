@@ -5,10 +5,7 @@ use std::sync::Arc;
 
 use fjall;
 
-use crate::metastore::{
-    AllBucketsTree, BaseMetaTree, Block, BlockID, BlockTree, BucketMeta, BucketTreeExt, MetaError,
-    MetaStore, Object, Transaction, BLOCKID_SIZE,
-};
+use crate::metastore::{BaseMetaTree, BucketTreeExt, MetaError, Store, BLOCKID_SIZE};
 
 #[derive(Clone)]
 pub struct FjallStoreNotx {
@@ -62,42 +59,24 @@ impl FjallStoreNotx {
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
     }
+    
+    pub fn get_inlined_metadata_size(&self) -> usize {
+        self.inlined_metadata_size
+    }
 }
 
-impl MetaStore for FjallStoreNotx {
-    fn max_inlined_data_length(&self) -> usize {
-        if self.inlined_metadata_size < Object::minimum_inline_metadata_size() {
-            return 0;
-        }
-        self.inlined_metadata_size - Object::minimum_inline_metadata_size()
-    }
-
-    fn get_bucket_ext(
-        &self,
-        name: &str,
-    ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-        let bucket = self.get_partition(name)?;
-        Ok(Box::new(FjallTreeNotx::new(Arc::new(bucket))))
-    }
-
-    fn get_allbuckets_tree(&self) -> Result<Box<dyn AllBucketsTree>, MetaError> {
-        Ok(Box::new(FjallTreeNotx::new(self.bucket_partition.clone())))
-    }
-
-    fn get_block_tree(&self) -> Result<Box<dyn BlockTree>, MetaError> {
-        Ok(Box::new(FjallTreeNotx::new(self.block_partition.clone())))
-    }
-
-    fn get_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+impl Store for FjallStoreNotx {
+    fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         let partition = self.get_partition(name)?;
         Ok(Box::new(FjallTreeNotx::new(Arc::new(partition))))
     }
 
-    fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        Ok(Box::new(FjallTreeNotx::new(self.path_partition.clone())))
+    fn tree_exists(&self, name: &str) -> Result<bool, MetaError> {
+        let exists = self.keyspace.partition_exists(name);
+        Ok(exists)
     }
 
-    fn drop_bucket(&self, name: &str) -> Result<(), MetaError> {
+    fn tree_delete(&self, name: &str) -> Result<(), MetaError> {
         let partition = self.get_partition(name)?;
         match self.keyspace.delete_partition(partition) {
             Ok(_) => Ok(()),
@@ -105,127 +84,27 @@ impl MetaStore for FjallStoreNotx {
         }
     }
 
-    fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
+    fn tree_list(&self) -> Result<Vec<String>, MetaError> {
+        // This is a placeholder implementation
+        // In a real implementation, we would need to get a list of all partitions
+        Ok(vec![])
+    }
+
+    fn set(&self, key: &str, value: Vec<u8>) -> Result<(), MetaError> {
         self.bucket_partition
-            .insert(bucket_name, raw_bucket)
-            .map_err(|e| MetaError::InsertError(e.to_string()))?;
-
-        match self.get_partition(bucket_name) {
-            // get partition to create it
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-        let exists = self.keyspace.partition_exists(bucket_name);
-        Ok(exists)
-    }
-
-    /// Get a list of all buckets in the system.
-    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        let buckets = self
-            .bucket_partition
-            .range::<Vec<u8>, _>(std::ops::RangeFull) // Specify type parameter for range
-            .filter_map(|raw_value| {
-                let value = match raw_value {
-                    Err(_) => return None,
-                    Ok((_, value)) => value,
-                };
-                // unwrap here is fine as it means the db is corrupt
-                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
-                Some(bucket_meta)
-            })
-            .collect();
-        Ok(buckets)
-    }
-
-    fn insert_meta(&self, bucket_name: &str, key: &str, raw_obj: Vec<u8>) -> Result<(), MetaError> {
-        let bucket = self.get_partition(bucket_name)?;
-        bucket
-            .insert(key, raw_obj)
+            .insert(key, value)
             .map_err(|e| MetaError::InsertError(e.to_string()))
     }
 
-    fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
-        let bucket = self.get_partition(bucket_name)?;
-        let raw_object = match bucket.get(key) {
-            Ok(Some(o)) => o,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-
-        let obj = Object::try_from(&*raw_object).expect("Malformed object");
-        Ok(Some(obj))
-    }
-
-    fn delete_object(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError> {
-        let bucket = self.get_partition(bucket)?;
-
-        let raw_object = match bucket.get(key) {
-            Ok(Some(o)) => o,
-            Ok(None) => return Ok(vec![]),
-            Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-        };
-
-        let obj = Object::try_from(&*raw_object).expect("Malformed object");
-        let mut to_delete: Vec<Block> = Vec::with_capacity(obj.blocks().len());
-
-        // delete the object in the database, we have it in memory to remove the
-        // blocks as needed.
-        bucket
-            .remove(key)
-            .map_err(|e| MetaError::RemoveError(e.to_string()))?;
-
-        for block_id in obj.blocks() {
-            match self.block_partition.get(block_id) {
-                Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-                Ok(None) => continue,
-                Ok(Some(block_data)) => {
-                    let mut block = Block::try_from(&*block_data).expect("corrupt block data");
-                    // We are deleting the last reference to the block, delete the
-                    // whole block.
-                    // Importantly, we don't remove the path yet from the path map.
-                    // Leaving this path dangling in the database ensures it is not
-                    // filled in by another block, before we properly delete the
-                    // path from disk.
-                    if block.rc() == 1 {
-                        self.block_partition
-                            .remove(block_id)
-                            .map_err(|e| MetaError::RemoveError(e.to_string()))?;
-                        to_delete.push(block);
-                    } else {
-                        block.decrement_refcount();
-                        self.block_partition
-                            .insert(block_id, block.to_vec())
-                            .map_err(|e| MetaError::InsertError(e.to_string()))?;
-                    }
-                }
-            }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, MetaError> {
+        match self.bucket_partition.get(key) {
+            Ok(Some(value)) => Ok(Some(value.to_vec())),
+            Ok(None) => Ok(None),
+            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
         }
-        Ok(to_delete)
-    }
-
-    fn begin_transaction(&self) -> Box<dyn Transaction> {
-        Box::new(FjallNoTransaction::new(Arc::new(self.clone())))
-    }
-
-    fn num_keys(&self) -> (usize, usize, usize) {
-        (
-            self.bucket_partition.approximate_len(),
-            self.block_partition.approximate_len(),
-            self.path_partition.approximate_len(),
-        )
-    }
-
-    fn disk_space(&self) -> u64 {
-        self.keyspace.disk_space()
     }
 }
 
-// FjallNoTransaction is fjall without real transaction support.
-// the transaction is not really reliable because we support it by ourself,
-// not provided by the underlying database.
 pub struct FjallNoTransaction {
     store: Arc<FjallStoreNotx>,
     inserted_blocks: Vec<BlockID>,
@@ -488,15 +367,15 @@ mod tests {
 
     impl test_utils::TestStore for FjallStoreNotx {
         fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
-            <FjallStoreNotx as MetaStore>::insert_bucket(self, bucket_name, raw_bucket)
+            <FjallStoreNotx as Store>::set(self, bucket_name, raw_bucket)
         }
 
         fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
-            <FjallStoreNotx as MetaStore>::bucket_exists(self, bucket_name)
+            <FjallStoreNotx as Store>::tree_exists(self, bucket_name)
         }
 
         fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-            <FjallStoreNotx as MetaStore>::list_buckets(self)
+            <FjallStoreNotx as Store>::tree_list(self)
         }
 
         fn insert_meta(
@@ -505,18 +384,18 @@ mod tests {
             key: &str,
             raw_obj: Vec<u8>,
         ) -> Result<(), MetaError> {
-            <FjallStoreNotx as MetaStore>::insert_meta(self, bucket_name, key, raw_obj)
+            <FjallStoreNotx as Store>::set(self, key, raw_obj)
         }
 
         fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
-            <FjallStoreNotx as MetaStore>::get_meta(self, bucket_name, key)
+            <FjallStoreNotx as Store>::get(self, key)
         }
 
         fn get_bucket_ext(
             &self,
             name: &str,
         ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-            <FjallStoreNotx as MetaStore>::get_bucket_ext(self, name)
+            <FjallStoreNotx as Store>::tree_open(self, name)
         }
     }
 

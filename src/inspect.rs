@@ -2,12 +2,18 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::cas::StorageEngine;
-use crate::metastore::{FjallStore, FjallStoreNotx, MetaStore};
+use crate::metastore::{FjallStore, FjallStoreNotx, MetaStore, Store};
 
 pub fn num_keys(meta_root: PathBuf, storage_engine: StorageEngine) -> Result<usize> {
-    let meta_store: Box<dyn MetaStore> = match storage_engine {
-        StorageEngine::Fjall => Box::new(FjallStore::new(meta_root, None, None)),
-        StorageEngine::FjallNotx => Box::new(FjallStoreNotx::new(meta_root, None)),
+    let meta_store = match storage_engine {
+        StorageEngine::Fjall => {
+            let store = FjallStore::new(meta_root, None, None);
+            MetaStore::new(store, None)
+        }
+        StorageEngine::FjallNotx => {
+            let store = FjallStoreNotx::new(meta_root, None);
+            MetaStore::new(store, None)
+        }
     };
 
     let (bucket_keys, block_keys, path_keys) = meta_store.num_keys();
@@ -15,9 +21,15 @@ pub fn num_keys(meta_root: PathBuf, storage_engine: StorageEngine) -> Result<usi
 }
 
 pub fn disk_space(meta_root: PathBuf, storage_engine: StorageEngine) -> u64 {
-    let meta_store: Box<dyn MetaStore> = match storage_engine {
-        StorageEngine::Fjall => Box::new(FjallStore::new(meta_root, None, None)),
-        StorageEngine::FjallNotx => Box::new(FjallStoreNotx::new(meta_root, None)),
+    let meta_store = match storage_engine {
+        StorageEngine::Fjall => {
+            let store = FjallStore::new(meta_root, None, None);
+            MetaStore::new(store, None)
+        }
+        StorageEngine::FjallNotx => {
+            let store = FjallStoreNotx::new(meta_root, None);
+            MetaStore::new(store, None)
+        }
     };
 
     meta_store.disk_space()
