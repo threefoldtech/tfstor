@@ -47,8 +47,10 @@ pub trait Store: Send + Sync + Debug + 'static {
 
     fn begin_transaction(&self) -> Transaction;
 
-    fn num_keys(&self) -> (usize, usize, usize);
+    // return number of keys in the tree
+    fn num_keys(&self, tree_name: &str) -> Result<usize, MetaError>;
 
+    // return disk space used by keyspace
     fn disk_space(&self) -> u64;
 }
 

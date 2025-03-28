@@ -16,8 +16,8 @@ pub fn num_keys(meta_root: PathBuf, storage_engine: StorageEngine) -> Result<usi
         }
     };
 
-    let (bucket_keys, block_keys, path_keys) = meta_store.num_keys();
-    Ok(bucket_keys + block_keys + path_keys)
+    let bucket_keys = meta_store.num_keys();
+    Ok(bucket_keys)
 }
 
 pub fn disk_space(meta_root: PathBuf, storage_engine: StorageEngine) -> u64 {

@@ -116,8 +116,9 @@ impl Store for FjallStore {
         Transaction::new(Box::new(FjallTransaction::new(tx, Arc::new(self.clone()))))
     }
 
-    fn num_keys(&self) -> (usize, usize, usize) {
-        unimplemented!(); // fjall with transaction does not support this
+    fn num_keys(&self, _: &str) -> Result<usize, MetaError> {
+        unimplemented!("fjall with transaction does not support number of keys");
+        // fjall with transaction does not support this
     }
 
     fn disk_space(&self) -> u64 {

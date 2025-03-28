@@ -194,8 +194,8 @@ impl MetaStore {
     }
 
     // returns the number of keys of the bucket, block, and path trees.
-    pub fn num_keys(&self) -> (usize, usize, usize) {
-        self.store.num_keys()
+    pub fn num_keys(&self) -> usize {
+        self.store.num_keys(DEFAULT_BUCKET_TREE).unwrap()
     }
 
     // returns the disk space used by the metadata store.

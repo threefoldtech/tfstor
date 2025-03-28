@@ -13,9 +13,6 @@ use crate::metastore::{
 #[derive(Clone)]
 pub struct FjallStoreNotx {
     keyspace: Arc<fjall::Keyspace>,
-    bucket_partition: Arc<fjall::PartitionHandle>,
-    block_partition: Arc<fjall::PartitionHandle>,
-    path_partition: Arc<fjall::PartitionHandle>,
     inlined_metadata_size: usize,
 }
 
@@ -30,28 +27,13 @@ impl std::fmt::Debug for FjallStoreNotx {
 impl FjallStoreNotx {
     pub fn new(path: PathBuf, inlined_metadata_size: Option<usize>) -> Self {
         tracing::debug!("Opening fjall store at {:?}", path);
-        const BUCKET_META_PARTITION: &str = "_BUCKETS";
-        const BLOCK_PARTITION: &str = "_BLOCKS";
-        const PATH_PARTITION: &str = "_PATHS";
 
         let keyspace = fjall::Config::new(path).open().unwrap();
-        let bucket_partition = keyspace
-            .open_partition(BUCKET_META_PARTITION, Default::default())
-            .unwrap();
-        let block_partition = keyspace
-            .open_partition(BLOCK_PARTITION, Default::default())
-            .unwrap();
-        let path_partition = keyspace
-            .open_partition(PATH_PARTITION, Default::default())
-            .unwrap();
         // setting very low will practically disable it by default
         let inlined_metadata_size = inlined_metadata_size.unwrap_or(1);
 
         Self {
             keyspace: Arc::new(keyspace),
-            bucket_partition: Arc::new(bucket_partition),
-            block_partition: Arc::new(block_partition),
-            path_partition: Arc::new(path_partition),
             inlined_metadata_size,
         }
     }
@@ -96,12 +78,9 @@ impl Store for FjallStoreNotx {
         Transaction::new(Box::new(FjallNoTransaction::new(Arc::new(self.clone()))))
     }
 
-    fn num_keys(&self) -> (usize, usize, usize) {
-        (
-            self.bucket_partition.approximate_len(),
-            self.block_partition.approximate_len(),
-            self.path_partition.approximate_len(),
-        )
+    fn num_keys(&self, tree_name: &str) -> Result<usize, MetaError> {
+        let partition = self.get_partition(tree_name)?;
+        Ok(partition.approximate_len())
     }
 
     fn disk_space(&self) -> u64 {
