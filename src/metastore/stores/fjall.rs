@@ -6,8 +6,8 @@ use std::sync::Arc;
 use fjall;
 
 use crate::metastore::{
-    BaseMetaTree, Block, BlockID, BucketMeta, BucketTreeExt, Durability, MetaError, Object, Store,
-    Transaction, BLOCKID_SIZE,
+    BaseMetaTree, BucketMeta, BucketTreeExt, Durability, MetaError, Object, Store, Transaction,
+    TransactionBackend,
 };
 
 #[derive(Clone)]
@@ -104,11 +104,7 @@ impl Store for FjallStore {
         }
     }
 
-    fn begin_transaction(
-        &self,
-        _block_tree_name: &str,
-        _path_tree_name: &str,
-    ) -> Box<dyn Transaction> {
+    fn begin_transaction(&self) -> Transaction {
         // Use unsafe to extend lifetime to 'static since the transaction
         // won't outlive the store
         let tx = unsafe {
@@ -116,15 +112,8 @@ impl Store for FjallStore {
                 self.keyspace.write_tx(),
             )
         };
-        let block_partition = self.get_partition(_block_tree_name).unwrap();
-        let path_partition = self.get_partition(_path_tree_name).unwrap();
 
-        Box::new(FjallTransaction::new(
-            tx,
-            Arc::new(self.clone()),
-            block_partition,
-            path_partition,
-        ))
+        Transaction::new(Box::new(FjallTransaction::new(tx, Arc::new(self.clone()))))
     }
 
     fn num_keys(&self) -> (usize, usize, usize) {
@@ -157,22 +146,13 @@ impl Store for FjallStore {
 pub struct FjallTransaction {
     tx: Option<fjall::WriteTransaction<'static>>,
     store: Arc<FjallStore>,
-    block_partition: fjall::TransactionalPartitionHandle,
-    path_partition: fjall::TransactionalPartitionHandle,
 }
 
 impl FjallTransaction {
-    pub fn new(
-        tx: fjall::WriteTransaction<'static>,
-        store: Arc<FjallStore>,
-        block_partition: fjall::TransactionalPartitionHandle,
-        path_partition: fjall::TransactionalPartitionHandle,
-    ) -> Self {
+    pub fn new(tx: fjall::WriteTransaction<'static>, store: Arc<FjallStore>) -> Self {
         Self {
             tx: Some(tx),
             store,
-            block_partition,
-            path_partition,
         }
     }
 }
@@ -180,8 +160,8 @@ impl FjallTransaction {
 unsafe impl Send for FjallTransaction {}
 unsafe impl Sync for FjallTransaction {}
 
-impl Transaction for FjallTransaction {
-    fn commit(mut self: Box<Self>) -> Result<(), MetaError> {
+impl TransactionBackend for FjallTransaction {
+    fn commit(&mut self) -> Result<(), MetaError> {
         if let Some(tx) = self.tx.take() {
             self.store.commit_persist(tx)
         } else {
@@ -191,55 +171,36 @@ impl Transaction for FjallTransaction {
         }
     }
 
-    fn rollback(mut self: Box<Self>) {
+    fn rollback(&mut self) {
         if let Some(tx) = self.tx.take() {
             tx.rollback();
         }
     }
 
-    fn write_block(
-        &mut self,
-        block_hash: BlockID,
-        data_len: usize,
-        key_has_block: bool,
-    ) -> Result<(bool, Block), MetaError> {
-        let blocks = self.block_partition.clone();
-        let paths = self.path_partition.clone();
-
-        let tx = self.tx.as_mut().ok_or_else(|| {
-            MetaError::TransactionError("Transaction already rolled back".to_string())
-        })?;
-
-        match tx.get(&blocks, block_hash) {
-            Ok(Some(block_data)) => {
-                let mut block =
-                    Block::try_from(&*block_data).expect("Only valid blocks are stored");
-
-                if !key_has_block {
-                    block.increment_refcount();
-                    tx.insert(&blocks, block_hash, block.to_vec());
-                }
-                Ok((false, block))
+    fn get(&mut self, tree_name: &str, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError> {
+        let partition = self.store.get_partition(tree_name)?;
+        if let Some(ref mut tx) = self.tx {
+            match tx.get(&partition, key) {
+                Ok(Some(data)) => Ok(Some(data.to_vec())),
+                Ok(None) => Ok(None),
+                Err(e) => Err(MetaError::OtherDBError(e.to_string())),
             }
-            Ok(None) => {
-                let mut idx = 0;
-                for index in 1..BLOCKID_SIZE {
-                    match tx.get(&paths, &block_hash[..index]) {
-                        Ok(Some(_)) => continue,
-                        Ok(None) => {
-                            idx = index;
-                            break;
-                        }
-                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-                    }
-                }
+        } else {
+            Err(MetaError::TransactionError(
+                "Transaction already rolled back".to_string(),
+            ))
+        }
+    }
 
-                tx.insert(&paths, &block_hash[..idx], block_hash);
-                let block = Block::new(data_len, block_hash[..idx].to_vec());
-                tx.insert(&blocks, block_hash, block.to_vec());
-                Ok((true, block))
-            }
-            Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+    fn insert(&mut self, tree_name: &str, block_id: &[u8], data: Vec<u8>) -> Result<(), MetaError> {
+        let partition = self.store.get_partition(tree_name)?;
+        if let Some(ref mut tx) = self.tx {
+            tx.insert(&partition, block_id, data);
+            Ok(())
+        } else {
+            Err(MetaError::TransactionError(
+                "Transaction already rolled back".to_string(),
+            ))
         }
     }
 }

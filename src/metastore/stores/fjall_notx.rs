@@ -6,8 +6,8 @@ use std::sync::Arc;
 use fjall;
 
 use crate::metastore::{
-    BaseMetaTree, Block, BlockID, BucketMeta, BucketTreeExt, MetaError, Object, Store, Transaction,
-    BLOCKID_SIZE,
+    BaseMetaTree, BucketMeta, BucketTreeExt, MetaError, Object, Store, Transaction,
+    TransactionBackend,
 };
 
 #[derive(Clone)]
@@ -92,18 +92,8 @@ impl Store for FjallStoreNotx {
         }
     }
 
-    fn begin_transaction(
-        &self,
-        block_tree_name: &str,
-        path_tree_name: &str,
-    ) -> Box<dyn Transaction> {
-        let block_partition = self.get_partition(block_tree_name).unwrap();
-        let path_partition = self.get_partition(path_tree_name).unwrap();
-        Box::new(FjallNoTransaction::new(
-            Arc::new(self.clone()),
-            block_partition,
-            path_partition,
-        ))
+    fn begin_transaction(&self) -> Transaction {
+        Transaction::new(Box::new(FjallNoTransaction::new(Arc::new(self.clone()))))
     }
 
     fn num_keys(&self) -> (usize, usize, usize) {
@@ -139,24 +129,15 @@ impl Store for FjallStoreNotx {
 
 pub struct FjallNoTransaction {
     store: Arc<FjallStoreNotx>,
-    block_partition: fjall::PartitionHandle,
-    path_partition: fjall::PartitionHandle,
-    inserted_blocks: Vec<BlockID>,
-    inserted_paths: Vec<Vec<u8>>,
+
+    inserted_keys: Vec<(String, Vec<u8>)>, // tupple of tree name and key
 }
 
 impl FjallNoTransaction {
-    pub fn new(
-        store: Arc<FjallStoreNotx>,
-        block_partition: fjall::PartitionHandle,
-        path_partition: fjall::PartitionHandle,
-    ) -> Self {
+    pub fn new(store: Arc<FjallStoreNotx>) -> Self {
         Self {
             store,
-            block_partition,
-            path_partition,
-            inserted_blocks: Vec::new(),
-            inserted_paths: Vec::new(),
+            inserted_keys: Vec::new(),
         }
     }
 }
@@ -164,67 +145,36 @@ impl FjallNoTransaction {
 unsafe impl Send for FjallNoTransaction {}
 unsafe impl Sync for FjallNoTransaction {}
 
-impl Transaction for FjallNoTransaction {
-    fn commit(self: Box<Self>) -> Result<(), MetaError> {
+impl TransactionBackend for FjallNoTransaction {
+    fn commit(&mut self) -> Result<(), MetaError> {
         Ok(())
     }
 
-    fn rollback(self: Box<Self>) {
-        for block_id in self.inserted_blocks {
-            let _ = self.store.block_partition.remove(block_id);
-        }
-
-        for path in self.inserted_paths {
-            let _ = self.store.path_partition.remove(&path);
+    fn rollback(&mut self) {
+        for (tree_name, key) in &self.inserted_keys {
+            let partition = self.store.get_partition(tree_name).unwrap();
+            let _ = partition.remove(key);
         }
     }
 
-    fn write_block(
-        &mut self,
-        block_hash: BlockID,
-        data_len: usize,
-        key_has_block: bool,
-    ) -> Result<(bool, Block), MetaError> {
-        match self.block_partition.get(block_hash) {
-            Ok(Some(block_data)) => {
-                let mut block =
-                    Block::try_from(&*block_data).expect("Only valid blocks are stored");
-
-                if !key_has_block {
-                    block.increment_refcount();
-                    self.block_partition
-                        .insert(block_hash, block.to_vec())
-                        .map_err(|e| MetaError::InsertError(e.to_string()))?;
-                    self.inserted_blocks.push(block_hash);
-                }
-                Ok((false, block))
-            }
-            Ok(None) => {
-                let mut idx = 0;
-                for index in 1..BLOCKID_SIZE {
-                    match self.path_partition.get(&block_hash[..index]) {
-                        Ok(Some(_)) => continue,
-                        Ok(None) => {
-                            idx = index;
-                            break;
-                        }
-                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
-                    }
-                }
-
-                self.path_partition
-                    .insert(&block_hash[..idx], block_hash)
-                    .map_err(|e| MetaError::InsertError(e.to_string()))?;
-                self.inserted_paths.push(block_hash[..idx].to_vec());
-
-                let block = Block::new(data_len, block_hash[..idx].to_vec());
-                self.block_partition
-                    .insert(block_hash, block.to_vec())
-                    .map_err(|e| MetaError::InsertError(e.to_string()))?;
-                self.inserted_blocks.push(block_hash);
-                Ok((true, block))
-            }
+    fn get(&mut self, tree_name: &str, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError> {
+        let partition = self.store.get_partition(tree_name)?;
+        match partition.get(key) {
+            Ok(Some(data)) => Ok(Some(data.to_vec())),
+            Ok(None) => Ok(None),
             Err(e) => Err(MetaError::OtherDBError(e.to_string())),
+        }
+    }
+
+    fn insert(&mut self, tree_name: &str, key: &[u8], data: Vec<u8>) -> Result<(), MetaError> {
+        let partition = self.store.get_partition(tree_name)?;
+        match partition.insert(key, data) {
+            Ok(_) => {
+                self.inserted_keys
+                    .push((tree_name.to_string(), key.to_vec()));
+                Ok(())
+            }
+            Err(e) => Err(MetaError::InsertError(e.to_string())),
         }
     }
 }

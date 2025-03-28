@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use super::{
-    BaseMetaTree, Block, BucketMeta, BucketTreeExt, MetaError, Object, Store, Transaction,
+    BaseMetaTree, Block, BlockID, BucketMeta, BucketTreeExt, MetaError, Object, Store, BLOCKID_SIZE,
 };
 
 /// MetaStore is a struct that provides methods to interact with the metadata store.
@@ -195,9 +195,8 @@ impl MetaStore {
         Ok(to_delete)
     }
 
-    pub fn begin_transaction(&self) -> Box<dyn Transaction> {
-        self.store
-            .begin_transaction(DEFAULT_BLOCK_TREE, DEFAULT_PATH_TREE)
+    pub fn begin_transaction(&self) -> Transaction {
+        self.store.begin_transaction()
     }
 
     // returns the number of keys of the bucket, block, and path trees.
@@ -255,4 +254,103 @@ impl BlockTree {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError> {
         self.tree.get(key)
     }
+}
+
+/// Represents a database transaction that can be committed or rolled back.
+/// It provides methods for writing blocks to the database.
+pub struct Transaction {
+    // The backend storage implementation
+    backend: Box<dyn TransactionBackend>,
+}
+
+impl Transaction {
+    pub(crate) fn new(backend: Box<dyn TransactionBackend>) -> Self {
+        Self { backend }
+    }
+
+    pub fn commit(mut self) -> Result<(), MetaError> {
+        self.backend.commit()
+    }
+
+    pub fn rollback(mut self) {
+        // Finally call the backend's rollback method for any other cleanup
+        self.backend.rollback();
+    }
+
+    /// Writes a block to the database.
+    ///
+    /// # Arguments
+    /// * `block_hash` - The hash of the block to write
+    /// * `data_len` - The length of the block data
+    /// * `key_has_block` - Whether the key already has this block
+    ///
+    /// # Returns
+    /// A tuple containing:
+    /// * A boolean indicating whether the block was newly created
+    /// * The Block object
+    pub fn write_block(
+        &mut self,
+        block_hash: BlockID,
+        data_len: usize,
+        key_has_block: bool,
+    ) -> Result<(bool, Block), MetaError> {
+        // Check if the block already exists
+        match self.backend.get(DEFAULT_BLOCK_TREE, &block_hash)? {
+            // Block exists
+            Some(block_data) => {
+                let mut block = Block::try_from(&*block_data as &[u8])
+                    .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+
+                // If the key doesn't have this block, increment the reference count
+                if !key_has_block {
+                    block.increment_refcount();
+                    self.backend
+                        .insert(DEFAULT_BLOCK_TREE, &block_hash, block.to_vec())?;
+                }
+
+                Ok((false, block))
+            }
+            // Block doesn't exist, create it
+            None => {
+                let mut idx = 0;
+                for index in 1..BLOCKID_SIZE {
+                    match self.backend.get(DEFAULT_PATH_TREE, &block_hash[..index]) {
+                        Ok(Some(_)) => continue,
+                        Ok(None) => {
+                            idx = index;
+                            break;
+                        }
+                        Err(e) => return Err(MetaError::OtherDBError(e.to_string())),
+                    }
+                }
+
+                // insert this new path
+                self.backend
+                    .insert(DEFAULT_PATH_TREE, &block_hash[..idx], block_hash.to_vec())?;
+
+                // insert this new block
+                let block = Block::new(data_len, block_hash[..idx].to_vec());
+
+                self.backend
+                    .insert(DEFAULT_BLOCK_TREE, &block_hash, block.to_vec())?;
+
+                Ok((true, block))
+            }
+        }
+    }
+}
+
+/// Abstracts the storage backend operations needed by Transaction
+pub(crate) trait TransactionBackend: Send + Sync {
+    /// Commit the transaction
+    fn commit(&mut self) -> Result<(), MetaError>;
+
+    /// Perform any backend-specific rollback operations
+    fn rollback(&mut self);
+
+    /// Get a block from the backend
+    fn get(&mut self, tree_name: &str, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError>;
+
+    /// Insert a new block into the backend
+    fn insert(&mut self, tree_name: &str, key: &[u8], data: Vec<u8>) -> Result<(), MetaError>;
 }

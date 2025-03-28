@@ -1,23 +1,7 @@
 use std::fmt::Debug;
 use std::str::FromStr;
 
-use super::{
-    block::{Block, BlockID},
-    bucket_meta::BucketMeta,
-    object::Object,
-    MetaError,
-};
-
-pub trait Transaction: Send + Sync {
-    fn commit(self: Box<Self>) -> Result<(), MetaError>;
-    fn rollback(self: Box<Self>);
-    fn write_block(
-        &mut self,
-        block_hash: BlockID,
-        data_len: usize,
-        key_has_block: bool,
-    ) -> Result<(bool, Block), MetaError>;
-}
+use super::{bucket_meta::BucketMeta, object::Object, MetaError, Transaction};
 
 pub trait BaseMetaTree: Send + Sync {
     /// insert inserts a key value pair into the tree.
@@ -60,11 +44,7 @@ pub trait Store: Send + Sync + Debug + 'static {
     // delete the tree with the given name
     fn tree_delete(&self, name: &str) -> Result<(), MetaError>;
 
-    fn begin_transaction(
-        &self,
-        block_tree_name: &str,
-        path_tree_name: &str,
-    ) -> Box<dyn Transaction>;
+    fn begin_transaction(&self) -> Transaction;
 
     fn num_keys(&self) -> (usize, usize, usize);
 
