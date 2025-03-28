@@ -13,9 +13,6 @@ use crate::metastore::{
 #[derive(Clone)]
 pub struct FjallStore {
     keyspace: Arc<fjall::TxKeyspace>,
-    bucket_partition: Arc<fjall::TxPartitionHandle>,
-    block_partition: Arc<fjall::TxPartitionHandle>,
-    path_partition: Arc<fjall::TxPartitionHandle>,
     inlined_metadata_size: usize,
     durability: fjall::PersistMode,
 }
@@ -37,20 +34,8 @@ impl FjallStore {
         durability: Option<Durability>,
     ) -> Self {
         tracing::debug!("Opening fjall store at {:?}", path);
-        const BUCKET_META_PARTITION: &str = "_BUCKETS";
-        const BLOCK_PARTITION: &str = "_BLOCKS";
-        const PATH_PARTITION: &str = "_PATHS";
 
         let tx_keyspace = fjall::Config::new(path).open_transactional().unwrap();
-        let bucket_partition = tx_keyspace
-            .open_partition(BUCKET_META_PARTITION, Default::default())
-            .unwrap();
-        let block_partition = tx_keyspace
-            .open_partition(BLOCK_PARTITION, Default::default())
-            .unwrap();
-        let path_partition = tx_keyspace
-            .open_partition(PATH_PARTITION, Default::default())
-            .unwrap();
         let inlined_metadata_size = inlined_metadata_size.unwrap_or(DEFAULT_INLINED_METADATA_SIZE);
 
         let durability = durability.unwrap_or(Durability::Fdatasync);
@@ -62,9 +47,6 @@ impl FjallStore {
 
         Self {
             keyspace: Arc::new(tx_keyspace),
-            bucket_partition: Arc::new(bucket_partition),
-            block_partition: Arc::new(block_partition),
-            path_partition: Arc::new(path_partition),
             inlined_metadata_size,
             durability,
         }
@@ -122,7 +104,11 @@ impl Store for FjallStore {
         }
     }
 
-    fn begin_transaction(&self) -> Box<dyn Transaction> {
+    fn begin_transaction(
+        &self,
+        _block_tree_name: &str,
+        _path_tree_name: &str,
+    ) -> Box<dyn Transaction> {
         // Use unsafe to extend lifetime to 'static since the transaction
         // won't outlive the store
         let tx = unsafe {
@@ -130,22 +116,30 @@ impl Store for FjallStore {
                 self.keyspace.write_tx(),
             )
         };
+        let block_partition = self.get_partition(_block_tree_name).unwrap();
+        let path_partition = self.get_partition(_path_tree_name).unwrap();
 
-        Box::new(FjallTransaction::new(tx, Arc::new(self.clone())))
+        Box::new(FjallTransaction::new(
+            tx,
+            Arc::new(self.clone()),
+            block_partition,
+            path_partition,
+        ))
     }
 
     fn num_keys(&self) -> (usize, usize, usize) {
-        unimplemented!();
+        unimplemented!(); // fjall with transaction does not support this
     }
 
     fn disk_space(&self) -> u64 {
         self.keyspace.disk_space()
     }
 
-    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
+    fn list_buckets(&self, bucket_partition_name: &str) -> Result<Vec<BucketMeta>, MetaError> {
+        let bucket_partition = self.get_partition(bucket_partition_name)?;
         let read_tx = self.keyspace.read_tx();
         let buckets = read_tx
-            .range::<Vec<u8>, _>(&self.bucket_partition, std::ops::RangeFull) // Specify type parameter for range
+            .range::<Vec<u8>, _>(&bucket_partition, std::ops::RangeFull) // Specify type parameter for range
             .filter_map(|raw_value| {
                 let value = match raw_value {
                     Err(_) => return None,
@@ -163,13 +157,22 @@ impl Store for FjallStore {
 pub struct FjallTransaction {
     tx: Option<fjall::WriteTransaction<'static>>,
     store: Arc<FjallStore>,
+    block_partition: fjall::TransactionalPartitionHandle,
+    path_partition: fjall::TransactionalPartitionHandle,
 }
 
 impl FjallTransaction {
-    pub fn new(tx: fjall::WriteTransaction<'static>, store: Arc<FjallStore>) -> Self {
+    pub fn new(
+        tx: fjall::WriteTransaction<'static>,
+        store: Arc<FjallStore>,
+        block_partition: fjall::TransactionalPartitionHandle,
+        path_partition: fjall::TransactionalPartitionHandle,
+    ) -> Self {
         Self {
             tx: Some(tx),
             store,
+            block_partition,
+            path_partition,
         }
     }
 }
@@ -200,8 +203,8 @@ impl Transaction for FjallTransaction {
         data_len: usize,
         key_has_block: bool,
     ) -> Result<(bool, Block), MetaError> {
-        let blocks = self.store.block_partition.clone();
-        let paths = self.store.path_partition.clone();
+        let blocks = self.block_partition.clone();
+        let paths = self.path_partition.clone();
 
         let tx = self.tx.as_mut().ok_or_else(|| {
             MetaError::TransactionError("Transaction already rolled back".to_string())

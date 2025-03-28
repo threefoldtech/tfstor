@@ -17,46 +17,20 @@ use super::{
 #[derive(Clone)]
 pub struct MetaStore {
     store: Arc<dyn Store>,
-    bucket_tree_name: String,
-    block_tree_name: String,
-    path_tree_name: String,
     inlined_metadata_size: usize,
 }
+const DEFAULT_BUCKET_TREE: &str = "_BUCKETS";
+const DEFAULT_BLOCK_TREE: &str = "_BLOCKS";
+const DEFAULT_PATH_TREE: &str = "_PATHS";
 
 impl MetaStore {
     pub fn new(store: impl Store + 'static, inlined_metadata_size: Option<usize>) -> Self {
-        const DEFAULT_BUCKET_TREE: &str = "_BUCKETS";
-        const DEFAULT_BLOCK_TREE: &str = "_BLOCKS";
-        const DEFAULT_PATH_TREE: &str = "_PATHS";
         const DEFAULT_INLINED_METADATA_SIZE: usize = 1; // setting very low will practically disable it by default
 
         Self {
             store: Arc::new(store),
-            bucket_tree_name: DEFAULT_BUCKET_TREE.to_string(),
-            block_tree_name: DEFAULT_BLOCK_TREE.to_string(),
-            path_tree_name: DEFAULT_PATH_TREE.to_string(),
             inlined_metadata_size: inlined_metadata_size.unwrap_or(DEFAULT_INLINED_METADATA_SIZE),
         }
-    }
-
-    pub fn with_tree_names(
-        mut self,
-        bucket_tree_name: impl Into<String>,
-        block_tree_name: impl Into<String>,
-        path_tree_name: impl Into<String>,
-    ) -> Self {
-        self.bucket_tree_name = bucket_tree_name.into();
-        self.block_tree_name = block_tree_name.into();
-        self.path_tree_name = path_tree_name.into();
-        self
-    }
-
-    fn ensure_tree_exists(&self, name: &str) -> Result<(), MetaError> {
-        if !self.store.tree_exists(name)? {
-            // Create the tree if it doesn't exist
-            let _tree = self.store.tree_open(name)?;
-        }
-        Ok(())
     }
 
     // returns the maximum length of the data that can be inlined in the metadata object
@@ -71,7 +45,7 @@ impl MetaStore {
     /// This tree is used to store the bucket lists and provide
     /// the CRUD for the bucket list.
     pub fn get_allbuckets_tree(&self) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-        self.store.tree_ext_open(&self.bucket_tree_name)
+        self.store.tree_ext_open(DEFAULT_BUCKET_TREE)
     }
 
     /// get_bucket_ext returns the tree for specific bucket with the extended methods
@@ -80,30 +54,26 @@ impl MetaStore {
         &self,
         name: &str,
     ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
-        self.ensure_tree_exists(name)?;
         self.store.tree_ext_open(name)
     }
 
     /// get_block_tree returns the block meta tree.
     /// This tree is used to store the data block metadata.
     pub fn get_block_tree(&self) -> Result<BlockTree, MetaError> {
-        self.ensure_tree_exists(&self.block_tree_name)?;
-        let tree = self.store.tree_open(&self.block_tree_name)?;
+        let tree = self.store.tree_open(DEFAULT_BLOCK_TREE)?;
         Ok(BlockTree { tree })
     }
 
     /// get_tree returns the tree with the given name.
     /// It is usually used if the app need to store some metadata for a specific purpose.
     pub fn get_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        self.ensure_tree_exists(name)?;
         self.store.tree_open(name)
     }
 
     /// get_path_tree returns the path meta tree
     /// This tree is used to store the file path metadata.
     pub fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        self.ensure_tree_exists(&self.path_tree_name)?;
-        self.store.tree_open(&self.path_tree_name)
+        self.store.tree_open(DEFAULT_PATH_TREE)
     }
 
     /// bucket_exists returns true if the bucket exists.
@@ -123,7 +93,7 @@ impl MetaStore {
     /// insert_bucket inserts raw representation of the bucket into the meta store.
     pub fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
         // Insert the bucket metadata into the buckets tree
-        let buckets = self.store.tree_open(&self.bucket_tree_name)?;
+        let buckets = self.store.tree_open(DEFAULT_BUCKET_TREE)?;
         buckets.insert(bucket_name.as_bytes(), raw_bucket)?;
 
         // Create the bucket tree if it doesn't exist
@@ -154,7 +124,7 @@ impl MetaStore {
             })
             .collect();
         Ok(buckets)*/
-        self.store.list_buckets()
+        self.store.list_buckets(DEFAULT_BUCKET_TREE)
     }
 
     /// insert_meta inserts a metadata Object into the bucket
@@ -230,7 +200,8 @@ impl MetaStore {
     }
 
     pub fn begin_transaction(&self) -> Box<dyn Transaction> {
-        self.store.begin_transaction()
+        self.store
+            .begin_transaction(DEFAULT_BLOCK_TREE, DEFAULT_PATH_TREE)
     }
 
     // returns the number of keys of the bucket, block, and path trees.
@@ -248,9 +219,9 @@ impl Debug for MetaStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MetaStore")
             .field("store", &"<Store>")
-            .field("bucket_tree_name", &self.bucket_tree_name)
-            .field("block_tree_name", &self.block_tree_name)
-            .field("path_tree_name", &self.path_tree_name)
+            .field("bucket_tree_name", &DEFAULT_BUCKET_TREE)
+            .field("block_tree_name", &DEFAULT_BLOCK_TREE)
+            .field("path_tree_name", &DEFAULT_PATH_TREE)
             .field("inlined_metadata_size", &self.inlined_metadata_size)
             .finish()
     }
@@ -342,13 +313,18 @@ pub trait Store: Send + Sync + Debug + 'static {
     // delete the tree with the given name
     fn tree_delete(&self, name: &str) -> Result<(), MetaError>;
 
-    fn begin_transaction(&self) -> Box<dyn Transaction>;
+    fn begin_transaction(
+        &self,
+        block_tree_name: &str,
+        path_tree_name: &str,
+    ) -> Box<dyn Transaction>;
 
     fn num_keys(&self) -> (usize, usize, usize);
 
     fn disk_space(&self) -> u64;
 
-    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError>;
+    // get list of all buckets in the system
+    fn list_buckets(&self, bucket_tree_name: &str) -> Result<Vec<BucketMeta>, MetaError>;
 }
 
 #[derive(Debug, Clone, Copy)]

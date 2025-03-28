@@ -92,8 +92,18 @@ impl Store for FjallStoreNotx {
         }
     }
 
-    fn begin_transaction(&self) -> Box<dyn Transaction> {
-        Box::new(FjallNoTransaction::new(Arc::new(self.clone())))
+    fn begin_transaction(
+        &self,
+        block_tree_name: &str,
+        path_tree_name: &str,
+    ) -> Box<dyn Transaction> {
+        let block_partition = self.get_partition(block_tree_name).unwrap();
+        let path_partition = self.get_partition(path_tree_name).unwrap();
+        Box::new(FjallNoTransaction::new(
+            Arc::new(self.clone()),
+            block_partition,
+            path_partition,
+        ))
     }
 
     fn num_keys(&self) -> (usize, usize, usize) {
@@ -109,9 +119,9 @@ impl Store for FjallStoreNotx {
     }
 
     /// Get a list of all buckets in the system.
-    fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        let buckets = self
-            .bucket_partition
+    fn list_buckets(&self, bucket_partition_name: &str) -> Result<Vec<BucketMeta>, MetaError> {
+        let bucket_partition = self.get_partition(bucket_partition_name)?;
+        let buckets = bucket_partition
             .range::<Vec<u8>, _>(std::ops::RangeFull) // Specify type parameter for range
             .filter_map(|raw_value| {
                 let value = match raw_value {
@@ -129,14 +139,22 @@ impl Store for FjallStoreNotx {
 
 pub struct FjallNoTransaction {
     store: Arc<FjallStoreNotx>,
+    block_partition: fjall::PartitionHandle,
+    path_partition: fjall::PartitionHandle,
     inserted_blocks: Vec<BlockID>,
     inserted_paths: Vec<Vec<u8>>,
 }
 
 impl FjallNoTransaction {
-    pub fn new(store: Arc<FjallStoreNotx>) -> Self {
+    pub fn new(
+        store: Arc<FjallStoreNotx>,
+        block_partition: fjall::PartitionHandle,
+        path_partition: fjall::PartitionHandle,
+    ) -> Self {
         Self {
             store,
+            block_partition,
+            path_partition,
             inserted_blocks: Vec::new(),
             inserted_paths: Vec::new(),
         }
@@ -167,17 +185,14 @@ impl Transaction for FjallNoTransaction {
         data_len: usize,
         key_has_block: bool,
     ) -> Result<(bool, Block), MetaError> {
-        let blocks = self.store.block_partition.clone();
-        let paths = self.store.path_partition.clone();
-
-        match blocks.get(block_hash) {
+        match self.block_partition.get(block_hash) {
             Ok(Some(block_data)) => {
                 let mut block =
                     Block::try_from(&*block_data).expect("Only valid blocks are stored");
 
                 if !key_has_block {
                     block.increment_refcount();
-                    blocks
+                    self.block_partition
                         .insert(block_hash, block.to_vec())
                         .map_err(|e| MetaError::InsertError(e.to_string()))?;
                     self.inserted_blocks.push(block_hash);
@@ -187,7 +202,7 @@ impl Transaction for FjallNoTransaction {
             Ok(None) => {
                 let mut idx = 0;
                 for index in 1..BLOCKID_SIZE {
-                    match paths.get(&block_hash[..index]) {
+                    match self.path_partition.get(&block_hash[..index]) {
                         Ok(Some(_)) => continue,
                         Ok(None) => {
                             idx = index;
@@ -197,13 +212,13 @@ impl Transaction for FjallNoTransaction {
                     }
                 }
 
-                paths
+                self.path_partition
                     .insert(&block_hash[..idx], block_hash)
                     .map_err(|e| MetaError::InsertError(e.to_string()))?;
                 self.inserted_paths.push(block_hash[..idx].to_vec());
 
                 let block = Block::new(data_len, block_hash[..idx].to_vec());
-                blocks
+                self.block_partition
                     .insert(block_hash, block.to_vec())
                     .map_err(|e| MetaError::InsertError(e.to_string()))?;
                 self.inserted_blocks.push(block_hash);
