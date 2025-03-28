@@ -5,3 +5,4 @@ pub use fs::CasFS;
 pub use fs::StorageEngine;
 mod buffered_byte_stream;
 pub mod fs;
+pub mod mock_casfs;
