@@ -10,45 +10,83 @@ use faster_hex::hex_string;
 use super::{BlockID, FsError, BLOCKID_SIZE, PTR_SIZE};
 
 /// Represents an object in the storage system with its metadata and content (for Inline objects).
+///
+/// An Object is the primary entity stored in the system and can be one of three types:
+/// - Single part: A regular object with one or more blocks
+/// - Multipart: An object composed of multiple parts uploaded separately
+/// - Inline: A small object with its data stored directly in the metadata
+///
+/// Each object contains metadata such as size, creation time, and a unique hash,
+/// along with either references to data blocks or the inline data itself.
 #[derive(Debug)]
 pub struct Object {
+    /// The type of the object (Single, Multipart, or Inline)
     object_type: ObjectType,
+    /// Total size of the object in bytes
     size: u64,
+    /// Creation time as a Unix timestamp (seconds since epoch)
     ctime: i64,
+    /// Unique hash identifier for the object
     hash: BlockID,
+    /// The actual data or references to data blocks
     data: ObjectData,
 }
 
+/// Represents the different ways object data can be stored.
+///
+/// This enum allows the system to handle different storage strategies
+/// based on object size and upload method.
 #[derive(Debug)]
 pub enum ObjectData {
-    // The object is stored inline in the metadata.
+    /// The object is stored inline in the metadata.
+    ///
+    /// Used for small objects where it's more efficient to store the data
+    /// directly in the metadata rather than as separate blocks.
     Inline {
+        /// The actual object data
         data: Vec<u8>,
     },
 
-    // The object is a single part object, and the blocks are stored in the blocks field.
+    /// The object is a single part object, and the blocks are stored separately.
+    ///
+    /// Used for regular objects that are uploaded in a single operation.
     SinglePart {
+        /// References to the data blocks that make up the object
         blocks: Vec<BlockID>,
     },
 
-    // The object is a multipart object, and the blocks are stored in the blocks field.
+    /// The object is a multipart object, with blocks stored separately.
+    ///
+    /// Used for objects that are uploaded in multiple parts, typically for
+    /// large objects or when resumable uploads are needed.
     MultiPart {
+        /// References to the data blocks that make up the object
         blocks: Vec<BlockID>,
-        // The amount of parts uploaded for this object. This wil equal the amount of individual parts. This is
-        // required so we can properly construct the formatted hash later.
+        /// The number of parts uploaded for this object
+        /// Required for proper ETag calculation and verification
         parts: usize,
     },
 }
 
+/// Defines the type of an object in the storage system.
+///
+/// This enum is used to distinguish between different object storage strategies.
 #[derive(Debug, PartialEq, Clone, Copy)]
 #[repr(u8)]
 pub enum ObjectType {
+    /// A regular object uploaded in a single operation
     Single = 0,
+    /// An object uploaded in multiple parts
     Multipart = 1,
+    /// A small object with data stored directly in the metadata
     Inline = 2,
 }
 
 impl ObjectType {
+    /// Converts the ObjectType to its u8 representation for serialization.
+    ///
+    /// # Returns
+    /// The numeric representation of the object type
     fn as_u8(&self) -> u8 {
         match self {
             ObjectType::Single => 0,
@@ -59,6 +97,17 @@ impl ObjectType {
 }
 
 impl Object {
+    /// Creates a new Object with the specified properties.
+    ///
+    /// The object_type is automatically determined based on the provided object_data.
+    ///
+    /// # Arguments
+    /// * `size` - Total size of the object in bytes
+    /// * `hash` - Unique hash identifier for the object
+    /// * `object_data` - The data storage strategy and content/references
+    ///
+    /// # Returns
+    /// A new Object instance
     pub fn new(size: u64, hash: BlockID, object_data: ObjectData) -> Self {
         let object_type = match &object_data {
             ObjectData::SinglePart { .. } => ObjectType::Single,
@@ -74,14 +123,30 @@ impl Object {
         }
     }
 
+    /// Returns the minimum size needed for inline metadata storage.
+    ///
+    /// This is used to determine if an object can be stored inline.
+    ///
+    /// # Returns
+    /// The minimum number of bytes required for inline metadata
     pub fn minimum_inline_metadata_size() -> usize {
         minimum_raw_object_size() + PTR_SIZE // size of common fields + size of data_len field
     }
 
+    /// Serializes the object to a byte vector.
+    ///
+    /// # Returns
+    /// A vector of bytes representing the serialized object
     pub fn to_vec(&self) -> Vec<u8> {
         self.into()
     }
 
+    /// Formats the object's ETag (Entity Tag) according to S3 conventions.
+    ///
+    /// For multipart objects, the ETag includes the part count.
+    ///
+    /// # Returns
+    /// A formatted ETag string
     pub fn format_e_tag(&self) -> String {
         if let ObjectData::MultiPart { parts, .. } = &self.data {
             format!("\"{}-{}\"", hex_string(&self.hash), parts)
@@ -91,18 +156,35 @@ impl Object {
         }
     }
 
+    /// Returns the unique hash identifier of the object.
+    ///
+    /// # Returns
+    /// A reference to the object's BlockID (hash)
     pub fn hash(&self) -> &BlockID {
         &self.hash
     }
 
+    /// Updates the object's creation time to the current time.
+    ///
+    /// This is typically used when an object is modified.
     pub fn touch(&mut self) {
         self.ctime = Utc::now().timestamp();
     }
 
+    /// Returns the total size of the object in bytes.
+    ///
+    /// # Returns
+    /// The object size
     pub fn size(&self) -> u64 {
         self.size
     }
 
+    /// Returns a slice of all block IDs that make up the object.
+    ///
+    /// For inline objects, this returns an empty slice.
+    ///
+    /// # Returns
+    /// A slice of BlockIDs
     pub fn blocks(&self) -> &[BlockID] {
         match &self.data {
             ObjectData::SinglePart { blocks } => blocks,
@@ -111,6 +193,13 @@ impl Object {
         }
     }
 
+    /// Checks if the object contains a specific block.
+    ///
+    /// # Arguments
+    /// * `block` - The block ID to check for
+    ///
+    /// # Returns
+    /// `true` if the object contains the block, `false` otherwise
     pub fn has_block(&self, block: &BlockID) -> bool {
         match &self.data {
             ObjectData::SinglePart { blocks } => blocks.contains(block),
@@ -119,17 +208,30 @@ impl Object {
         }
     }
 
+    /// Returns the last modification time of the object as a SystemTime.
+    ///
+    /// # Returns
+    /// The last modification time
     pub fn last_modified(&self) -> SystemTime {
         UNIX_EPOCH + std::time::Duration::from_secs(self.ctime as u64)
     }
 
+    /// Formats the creation time as an RFC3339 string.
+    ///
+    /// # Returns
+    /// A formatted timestamp string
     pub fn format_ctime(&self) -> String {
         Utc.timestamp_opt(self.ctime, 0)
             .unwrap()
             .to_rfc3339_opts(SecondsFormat::Secs, true)
     }
 
-    // Returns the number of bytes this object would take up in serialized form.
+    /// Calculates the number of bytes this object would take up in serialized form.
+    ///
+    /// This is used to allocate the right amount of memory for serialization.
+    ///
+    /// # Returns
+    /// The number of bytes needed for serialization
     fn num_bytes(&self) -> usize {
         let mandatory_fields_size = 17 + BLOCKID_SIZE;
         match &self.data {
@@ -143,9 +245,18 @@ impl Object {
         }
     }
 
+    /// Checks if the object is stored inline.
+    ///
+    /// # Returns
+    /// `true` if the object is stored inline, `false` otherwise
     pub fn is_inlined(&self) -> bool {
         matches!(&self.data, ObjectData::Inline { .. })
     }
+
+    /// Returns the inline data if the object is stored inline.
+    ///
+    /// # Returns
+    /// Some(&Vec<u8>) if the object is inline, None otherwise
     pub fn inlined(&self) -> Option<&Vec<u8>> {
         match &self.data {
             ObjectData::Inline { data } => Some(data),
@@ -154,6 +265,14 @@ impl Object {
     }
 }
 
+/// Implements serialization of an Object to a byte vector.
+///
+/// The serialization format includes:
+/// - 1 byte for object type
+/// - 8 bytes for size
+/// - 8 bytes for creation time
+/// - BLOCKID_SIZE bytes for hash
+/// - Variant-specific data based on the object type
 impl From<&Object> for Vec<u8> {
     fn from(o: &Object) -> Self {
         let mut raw_data = Vec::with_capacity(o.num_bytes());
@@ -188,10 +307,19 @@ impl From<&Object> for Vec<u8> {
     }
 }
 
+/// Returns the minimum size required for the common fields of an Object.
+///
+/// This includes the object type, size, creation time, hash, and a pointer to data.
+///
+/// # Returns
+/// The minimum number of bytes needed for the common fields
 fn minimum_raw_object_size() -> usize {
     17 + BLOCKID_SIZE + PTR_SIZE
 }
 
+/// Implements deserialization of an Object from a byte slice.
+///
+/// This implementation validates the input format and extracts all object fields.
 impl TryFrom<&[u8]> for Object {
     type Error = FsError;
 

@@ -6,20 +6,32 @@ use super::{
     BaseMetaTree, Block, BlockID, BucketMeta, MetaError, MetaTreeExt, Object, Store, BLOCKID_SIZE,
 };
 
-/// MetaStore is a struct that provides methods to interact with the metadata store.
+/// `MetaStore` is a struct that provides methods to interact with the metadata store.
 ///
 /// It uses a Store implementation to handle the low-level storage operations.
 /// The MetaStore provides higher-level operations for buckets, blocks, paths, and objects.
+/// It serves as the main entry point for interacting with the metadata storage layer.
 #[derive(Clone)]
 pub struct MetaStore {
     store: Arc<dyn Store>,
     inlined_metadata_size: usize,
 }
+
+/// Default tree names used by the MetaStore
+/// These constants define the names of the special trees used internally
 const DEFAULT_BUCKET_TREE: &str = "_BUCKETS";
 const DEFAULT_BLOCK_TREE: &str = "_BLOCKS";
 const DEFAULT_PATH_TREE: &str = "_PATHS";
 
 impl MetaStore {
+    /// Creates a new MetaStore instance with the given store implementation.
+    ///
+    /// # Arguments
+    /// * `store` - The storage backend implementation
+    /// * `inlined_metadata_size` - Optional size limit for inlined metadata. If None, a default value is used.
+    ///
+    /// # Returns
+    /// A new MetaStore instance
     pub fn new(store: impl Store + 'static, inlined_metadata_size: Option<usize>) -> Self {
         const DEFAULT_INLINED_METADATA_SIZE: usize = 1; // setting very low will practically disable it by default
 
@@ -29,7 +41,13 @@ impl MetaStore {
         }
     }
 
-    // returns the maximum length of the data that can be inlined in the metadata object
+    /// Returns the maximum length of the data that can be inlined in the metadata object.
+    ///
+    /// Inlining small data directly in metadata can improve performance by reducing the number
+    /// of storage operations needed for small objects.
+    ///
+    /// # Returns
+    /// The maximum number of bytes that can be inlined
     pub fn max_inlined_data_length(&self) -> usize {
         if self.inlined_metadata_size < Object::minimum_inline_metadata_size() {
             return 0;
@@ -37,15 +55,26 @@ impl MetaStore {
         self.inlined_metadata_size - Object::minimum_inline_metadata_size()
     }
 
-    /// returns tree which contains all the buckets.
+    /// Returns the tree which contains all the buckets.
+    ///
     /// This tree is used to store the bucket lists and provide
-    /// the CRUD for the bucket list.
+    /// the CRUD operations for the bucket list.
+    ///
+    /// # Returns
+    /// A tree with extended functionality for bucket operations or an error
     pub fn get_allbuckets_tree(&self) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
         self.store.tree_ext_open(DEFAULT_BUCKET_TREE)
     }
 
-    /// get_bucket_ext returns the tree for specific bucket with the extended methods
-    /// we use this tree to provide additional methods for the bucket like the range and list methods.
+    /// Returns the tree for a specific bucket with extended methods.
+    ///
+    /// This tree provides additional methods for the bucket like range queries and listing operations.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the bucket
+    ///
+    /// # Returns
+    /// A tree with extended functionality for the specified bucket or an error
     pub fn get_bucket_ext(
         &self,
         name: &str,
@@ -53,31 +82,62 @@ impl MetaStore {
         self.store.tree_ext_open(name)
     }
 
-    /// get_block_tree returns the block meta tree.
-    /// This tree is used to store the data block metadata.
+    /// Returns the block metadata tree.
+    ///
+    /// This tree is used to store the data block metadata, including reference counts
+    /// and other block-specific information.
+    ///
+    /// # Returns
+    /// A BlockTree instance or an error
     pub fn get_block_tree(&self) -> Result<BlockTree, MetaError> {
         let tree = self.store.tree_open(DEFAULT_BLOCK_TREE)?;
         Ok(BlockTree { tree })
     }
 
-    /// get_tree returns the tree with the given name.
-    /// It is usually used if the app need to store some metadata for a specific purpose.
+    /// Returns a tree with the given name.
+    ///
+    /// This is typically used when the application needs to store custom metadata
+    /// for a specific purpose outside the standard bucket/object model.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the tree to open
+    ///
+    /// # Returns
+    /// A tree instance or an error
     pub fn get_tree(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         self.store.tree_open(name)
     }
 
-    /// get_path_tree returns the path meta tree
-    /// This tree is used to store the file path metadata.
+    /// Returns the path metadata tree.
+    ///
+    /// This tree is used to store file path metadata and path-related information.
+    ///
+    /// # Returns
+    /// A tree instance or an error
     pub fn get_path_tree(&self) -> Result<Box<dyn BaseMetaTree>, MetaError> {
         self.store.tree_open(DEFAULT_PATH_TREE)
     }
 
-    /// bucket_exists returns true if the bucket exists.
+    /// Checks if a bucket with the given name exists.
+    ///
+    /// # Arguments
+    /// * `bucket_name` - The name of the bucket to check
+    ///
+    /// # Returns
+    /// `true` if the bucket exists, `false` otherwise, or an error
     pub fn bucket_exists(&self, bucket_name: &str) -> Result<bool, MetaError> {
         self.store.tree_exists(bucket_name)
     }
 
-    /// drop_bucket drops the bucket with the given name.
+    /// Deletes the bucket with the given name.
+    ///
+    /// If the bucket doesn't exist, this operation is a no-op and returns success.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the bucket to delete
+    ///
+    /// # Returns
+    /// Success or an error if the deletion fails
     pub fn drop_bucket(&self, name: &str) -> Result<(), MetaError> {
         if self.bucket_exists(name)? {
             self.store.tree_delete(name)
@@ -86,7 +146,17 @@ impl MetaStore {
         }
     }
 
-    /// insert_bucket inserts raw representation of the bucket into the meta store.
+    /// Inserts a raw representation of a bucket into the meta store.
+    ///
+    /// This method both adds the bucket metadata to the buckets tree and
+    /// creates the bucket's own tree if it doesn't already exist.
+    ///
+    /// # Arguments
+    /// * `bucket_name` - The name of the bucket
+    /// * `raw_bucket` - The serialized bucket metadata
+    ///
+    /// # Returns
+    /// Success or an error if the insertion fails
     pub fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
         // Insert the bucket metadata into the buckets tree
         let buckets = self.store.tree_open(DEFAULT_BUCKET_TREE)?;
@@ -98,8 +168,14 @@ impl MetaStore {
         Ok(())
     }
 
-    /// Get a list of all buckets in the system.
-    /// TODO: this should be paginated and return a stream.
+    /// Returns a list of all buckets in the system.
+    ///
+    /// # Returns
+    /// A vector of BucketMeta objects or an error
+    ///
+    /// # Note
+    /// This method currently loads all buckets into memory at once.
+    /// TODO: This should be paginated and return a stream for better scalability.
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         let bucket = self.get_allbuckets_tree()?;
         let buckets = bucket
@@ -117,7 +193,15 @@ impl MetaStore {
         Ok(buckets)
     }
 
-    /// insert_meta inserts a metadata Object into the bucket
+    /// Inserts a metadata Object into the specified bucket.
+    ///
+    /// # Arguments
+    /// * `bucket_name` - The name of the bucket
+    /// * `key` - The key to associate with the object
+    /// * `raw_obj` - The serialized object metadata
+    ///
+    /// # Returns
+    /// Success or an error if the insertion fails
     pub fn insert_meta(
         &self,
         bucket_name: &str,
@@ -128,8 +212,17 @@ impl MetaStore {
         bucket.insert(key.as_bytes(), raw_obj)
     }
 
-    /// get_meta returns the Object metadata for the given bucket and key.
-    /// We return the Object struct instead of the raw bytes for performance reason.
+    /// Retrieves the Object metadata for the given bucket and key.
+    ///
+    /// This method returns the deserialized Object struct instead of raw bytes
+    /// for better performance and convenience.
+    ///
+    /// # Arguments
+    /// * `bucket_name` - The name of the bucket
+    /// * `key` - The key to look up
+    ///
+    /// # Returns
+    /// The Object if found, None if the key doesn't exist, or an error
     pub fn get_meta(&self, bucket_name: &str, key: &str) -> Result<Option<Object>, MetaError> {
         let bucket = self.get_bucket_ext(bucket_name)?;
         match bucket.get(key.as_bytes())? {
@@ -141,15 +234,26 @@ impl MetaStore {
         }
     }
 
-    /// delete object in a bucket for the given key.
+    /// Deletes an object from a bucket and manages its associated blocks.
     ///
-    /// It should do at least the following:
-    /// - get all the blocks from the object
-    /// - decrements the refcount of all blocks, then removes blocks which are no longer referenced.
-    /// - and return the deleted blocks, so that the caller can remove the blocks from the storage.
+    /// This method performs the following operations:
+    /// 1. Retrieves the object metadata from the bucket
+    /// 2. Removes the object from the bucket
+    /// 3. For each block in the object:
+    ///    - Decrements its reference count
+    ///    - If the reference count reaches zero, marks the block for deletion
+    /// 4. Returns the list of blocks that should be physically deleted from storage
     ///
-    /// TODO: all the above steps shouldn't be done in the meta storage layer.
-    ///       we do it there because we still couldn't abstract the DB transaction.
+    /// # Arguments
+    /// * `bucket` - The name of the bucket containing the object
+    /// * `key` - The key of the object to delete
+    ///
+    /// # Returns
+    /// A vector of Block objects that should be physically deleted, or an error
+    ///
+    /// # Note
+    /// This method currently handles reference counting and block management directly.
+    /// In the future, these operations should be abstracted into a transaction system.
     pub fn delete_object(&self, bucket: &str, key: &str) -> Result<Vec<Block>, MetaError> {
         let bucket_tree = self.get_bucket_ext(bucket)?;
         let block_tree = self.get_block_tree()?;
@@ -189,16 +293,28 @@ impl MetaStore {
         Ok(to_delete)
     }
 
+    /// Begins a new transaction for atomic operations.
+    ///
+    /// # Returns
+    /// A new Transaction object
     pub fn begin_transaction(&self) -> Transaction {
         self.store.begin_transaction()
     }
 
-    // returns the number of keys of the bucket, block, and path trees.
+    /// Returns the total number of keys in the bucket tree.
+    ///
+    /// This is primarily used for monitoring and debugging purposes.
+    ///
+    /// # Returns
+    /// The number of keys in the bucket tree
     pub fn num_keys(&self) -> usize {
         self.store.num_keys(DEFAULT_BUCKET_TREE).unwrap()
     }
 
-    // returns the disk space used by the metadata store.
+    /// Returns the total disk space used by the metadata store.
+    ///
+    /// # Returns
+    /// The disk space usage in bytes
     pub fn disk_space(&self) -> u64 {
         self.store.disk_space()
     }
@@ -216,12 +332,24 @@ impl Debug for MetaStore {
     }
 }
 
+/// `BlockTree` provides specialized operations for working with block metadata.
+///
+/// This struct wraps a BaseMetaTree and provides methods specific to block operations,
+/// such as retrieving and manipulating block metadata.
 pub struct BlockTree {
     tree: Box<dyn BaseMetaTree>,
 }
 
 impl BlockTree {
-    /// get_block_obj returns the `Object` for the given key.
+    /// Retrieves a Block object for the given key.
+    ///
+    /// This method deserializes the raw block data into a Block struct.
+    ///
+    /// # Arguments
+    /// * `key` - The key (typically a block hash) to look up
+    ///
+    /// # Returns
+    /// The Block if found, None if the key doesn't exist, or an error
     pub fn get_block(&self, key: &[u8]) -> Result<Option<Block>, MetaError> {
         match self.tree.get(key)? {
             Some(data) => {
@@ -232,46 +360,93 @@ impl BlockTree {
         }
     }
 
+    /// Returns the number of blocks in the tree.
+    ///
+    /// This method is only available in test builds.
+    ///
+    /// # Returns
+    /// The number of blocks or an error
     #[cfg(test)]
     pub fn len(&self) -> Result<usize, MetaError> {
         self.tree.len()
     }
 
+    /// Removes a block from the tree.
+    ///
+    /// # Arguments
+    /// * `key` - The key of the block to remove
+    ///
+    /// # Returns
+    /// Success or an error if the removal fails
     fn remove(&self, key: &[u8]) -> Result<(), MetaError> {
         self.tree.remove(key)
     }
 
+    /// Inserts a block into the tree.
+    ///
+    /// # Arguments
+    /// * `key` - The key to associate with the block
+    /// * `value` - The serialized block data
+    ///
+    /// # Returns
+    /// Success or an error if the insertion fails
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), MetaError> {
         self.tree.insert(key, value)
     }
 
+    /// Retrieves the raw block data for the given key.
+    ///
+    /// # Arguments
+    /// * `key` - The key to look up
+    ///
+    /// # Returns
+    /// The raw block data if found, None if the key doesn't exist, or an error
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError> {
         self.tree.get(key)
     }
 }
 
 /// Represents a database transaction that can be committed or rolled back.
-/// It provides methods for writing blocks to the database.
+///
+/// It provides methods for writing blocks to the database and managing
+/// the lifecycle of a transaction.
 pub struct Transaction {
     // The backend storage implementation
     backend: Box<dyn TransactionBackend>,
 }
 
 impl Transaction {
+    /// Creates a new Transaction with the given backend.
+    ///
+    /// # Arguments
+    /// * `backend` - The transaction backend implementation
+    ///
+    /// # Returns
+    /// A new Transaction instance
     pub(crate) fn new(backend: Box<dyn TransactionBackend>) -> Self {
         Self { backend }
     }
 
+    /// Commits the transaction, making all changes permanent.
+    ///
+    /// # Returns
+    /// Success or an error if the commit fails
     pub fn commit(mut self) -> Result<(), MetaError> {
         self.backend.commit()
     }
 
+    /// Rolls back the transaction, discarding all changes.
+    ///
+    /// This method is called when the transaction should be aborted.
     pub fn rollback(mut self) {
-        // Finally call the backend's rollback method for any other cleanup
+        // Call the backend's rollback method for cleanup
         self.backend.rollback();
     }
 
-    /// Writes a block to the database.
+    /// Writes a block to the database, handling reference counting and path creation.
+    ///
+    /// This method either creates a new block or updates an existing one's reference count.
+    /// For new blocks, it also creates the necessary path entries.
     ///
     /// # Arguments
     /// * `block_hash` - The hash of the block to write
@@ -334,17 +509,38 @@ impl Transaction {
     }
 }
 
-/// Abstracts the storage backend operations needed by Transaction
+/// Abstracts the storage backend operations needed by Transaction.
+///
+/// This trait defines the interface that any storage backend must implement
+/// to support transactions in the metadata store.
 pub(crate) trait TransactionBackend: Send + Sync {
-    /// Commit the transaction
+    /// Commits the transaction, making all changes permanent.
+    ///
+    /// # Returns
+    /// Success or an error if the commit fails
     fn commit(&mut self) -> Result<(), MetaError>;
 
-    /// Perform any backend-specific rollback operations
+    /// Rolls back the transaction, discarding all changes.
     fn rollback(&mut self);
 
-    /// Get a block from the backend
+    /// Retrieves a value from the specified tree.
+    ///
+    /// # Arguments
+    /// * `tree_name` - The name of the tree to query
+    /// * `key` - The key to look up
+    ///
+    /// # Returns
+    /// The value if found, None if the key doesn't exist, or an error
     fn get(&mut self, tree_name: &str, key: &[u8]) -> Result<Option<Vec<u8>>, MetaError>;
 
-    /// Insert a new block into the backend
+    /// Inserts a value into the specified tree.
+    ///
+    /// # Arguments
+    /// * `tree_name` - The name of the tree
+    /// * `key` - The key to associate with the value
+    /// * `data` - The value to insert
+    ///
+    /// # Returns
+    /// Success or an error if the insertion fails
     fn insert(&mut self, tree_name: &str, key: &[u8], data: Vec<u8>) -> Result<(), MetaError>;
 }
