@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::str::FromStr;
 
-use super::{bucket_meta::BucketMeta, object::Object, MetaError, Transaction};
+use super::{object::Object, MetaError, Transaction};
 
 pub trait BaseMetaTree: Send + Sync {
     /// insert inserts a key value pair into the tree.
@@ -18,10 +18,11 @@ pub trait BaseMetaTree: Send + Sync {
     fn len(&self) -> Result<usize, MetaError>;
 }
 
-pub trait BucketTreeExt: BaseMetaTree {
-    // get all keys of the bucket
-    // TODO : make it paginated
-    fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send>;
+pub type KeyValuePairs = Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>), MetaError>> + Send>;
+
+pub trait MetaTreeExt: BaseMetaTree {
+    // iterate all key and value pairs
+    fn iter_all(&self) -> KeyValuePairs;
 
     fn range_filter<'a>(
         &'a self,
@@ -36,7 +37,7 @@ pub trait Store: Send + Sync + Debug + 'static {
     // creates the tree if it doesn't exist
     fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;
 
-    fn tree_ext_open(&self, name: &str) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError>;
+    fn tree_ext_open(&self, name: &str) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError>;
 
     // check if the tree exists
     fn tree_exists(&self, name: &str) -> Result<bool, MetaError>;
@@ -49,9 +50,6 @@ pub trait Store: Send + Sync + Debug + 'static {
     fn num_keys(&self) -> (usize, usize, usize);
 
     fn disk_space(&self) -> u64;
-
-    // get list of all buckets in the system
-    fn list_buckets(&self, bucket_tree_name: &str) -> Result<Vec<BucketMeta>, MetaError>;
 }
 
 #[derive(Debug, Clone, Copy)]

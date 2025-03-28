@@ -6,7 +6,7 @@ use std::sync::Arc;
 use fjall;
 
 use crate::metastore::{
-    BaseMetaTree, BucketMeta, BucketTreeExt, MetaError, Object, Store, Transaction,
+    BaseMetaTree, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
     TransactionBackend,
 };
 
@@ -74,7 +74,7 @@ impl Store for FjallStoreNotx {
         Ok(Box::new(FjallTreeNotx::new(Arc::new(partition))))
     }
 
-    fn tree_ext_open(&self, name: &str) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+    fn tree_ext_open(&self, name: &str) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
         let partition = self.get_partition(name)?;
         Ok(Box::new(FjallTreeNotx::new(Arc::new(partition))))
     }
@@ -106,24 +106,6 @@ impl Store for FjallStoreNotx {
 
     fn disk_space(&self) -> u64 {
         self.keyspace.disk_space()
-    }
-
-    /// Get a list of all buckets in the system.
-    fn list_buckets(&self, bucket_partition_name: &str) -> Result<Vec<BucketMeta>, MetaError> {
-        let bucket_partition = self.get_partition(bucket_partition_name)?;
-        let buckets = bucket_partition
-            .range::<Vec<u8>, _>(std::ops::RangeFull) // Specify type parameter for range
-            .filter_map(|raw_value| {
-                let value = match raw_value {
-                    Err(_) => return None,
-                    Ok((_, value)) => value,
-                };
-                // unwrap here is fine as it means the db is corrupt
-                let bucket_meta = BucketMeta::try_from(&*value).expect("Corrupted bucket metadata");
-                Some(bucket_meta)
-            })
-            .collect();
-        Ok(buckets)
     }
 }
 
@@ -237,8 +219,8 @@ impl BaseMetaTree for FjallTreeNotx {
     }
 }
 
-impl BucketTreeExt for FjallTreeNotx {
-    fn get_bucket_keys(&self) -> Box<dyn Iterator<Item = Result<Vec<u8>, MetaError>> + Send> {
+impl MetaTreeExt for FjallTreeNotx {
+    fn iter_all(&self) -> KeyValuePairs {
         let partition = self.partition.clone();
         let mut last_key: Option<Vec<u8>> = None;
 
@@ -256,9 +238,9 @@ impl BucketTreeExt for FjallTreeNotx {
                 .range::<Vec<u8>, _>(range)
                 .next()
                 .map(|res| match res {
-                    Ok((k, _)) => {
+                    Ok((k, v)) => {
                         last_key = Some(k.to_vec());
-                        Ok(k.to_vec())
+                        Ok((k.to_vec(), v.to_vec()))
                     }
                     Err(e) => {
                         tracing::error!("Error reading key: {}", e);
@@ -344,7 +326,7 @@ mod tests {
         fn get_bucket_ext(
             &self,
             name: &str,
-        ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+        ) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
             <FjallStoreNotx as Store>::tree_ext_open(self, name)
         }
     }

@@ -1,9 +1,9 @@
-use crate::metastore::{BaseMetaTree, BlockID, BucketTreeExt, MetaError, Object, ObjectData};
+use crate::metastore::{BaseMetaTree, BlockID, MetaTreeExt, MetaError, Object, ObjectData};
 
 pub trait TestStore {
     fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;
     fn get_bucket_ext(&self, name: &str)
-        -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError>;
+        -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError>;
 }
 
 pub fn test_get_bucket_keys(store: &impl TestStore) {
@@ -28,9 +28,9 @@ pub fn test_get_bucket_keys(store: &impl TestStore) {
     let bucket = store.get_bucket_ext(bucket_name).unwrap();
 
     let retrieved_keys: Vec<String> = bucket
-        .get_bucket_keys()
+        .iter_all()
         .into_iter()
-        .map(|k| String::from_utf8(k.unwrap()).unwrap())
+        .map(|kv| String::from_utf8(kv.unwrap().0).unwrap())
         .collect();
 
     // Verify all keys present
@@ -43,7 +43,7 @@ pub fn test_get_bucket_keys(store: &impl TestStore) {
     let empty_bucket = "empty-bucket";
     let _ = store.tree_open(empty_bucket);
     let empty = store.get_bucket_ext(empty_bucket).unwrap();
-    assert_eq!(empty.get_bucket_keys().count(), 0);
+    assert_eq!(empty.iter_all().count(), 0);
 }
 
 pub fn test_range_filter(store: &impl TestStore) {

@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use super::{
-    BaseMetaTree, Block, BlockID, BucketMeta, BucketTreeExt, MetaError, Object, Store, BLOCKID_SIZE,
+    BaseMetaTree, Block, BlockID, BucketMeta, MetaError, MetaTreeExt, Object, Store, BLOCKID_SIZE,
 };
 
 /// MetaStore is a struct that provides methods to interact with the metadata store.
@@ -40,7 +40,7 @@ impl MetaStore {
     /// returns tree which contains all the buckets.
     /// This tree is used to store the bucket lists and provide
     /// the CRUD for the bucket list.
-    pub fn get_allbuckets_tree(&self) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+    pub fn get_allbuckets_tree(&self) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
         self.store.tree_ext_open(DEFAULT_BUCKET_TREE)
     }
 
@@ -49,7 +49,7 @@ impl MetaStore {
     pub fn get_bucket_ext(
         &self,
         name: &str,
-    ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+    ) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
         self.store.tree_ext_open(name)
     }
 
@@ -101,26 +101,20 @@ impl MetaStore {
     /// Get a list of all buckets in the system.
     /// TODO: this should be paginated and return a stream.
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        /*let bucket_tree = self.get_allbuckets_tree()?;
-        let buckets = bucket_tree
-            .get_bucket_keys()
+        let bucket = self.get_allbuckets_tree()?;
+        let buckets = bucket
+            .iter_all()
             .filter_map(|result| {
-                let key = match result {
-                    Ok(k) => k,
+                let (_, value) = match result {
+                    Ok(kv) => kv,
                     Err(_) => return None,
                 };
 
-                let value = match self.store.get(std::str::from_utf8(&key).unwrap()) {
-                    Ok(Some(v)) => v,
-                    _ => return None,
-                };
-
                 let bucket_meta = BucketMeta::try_from(&*value).ok()?;
-                Some(bucket_meta)
+                Some(bucket_meta) // Just return the BucketMeta without the key
             })
             .collect();
-        Ok(buckets)*/
-        self.store.list_buckets(DEFAULT_BUCKET_TREE)
+        Ok(buckets)
     }
 
     /// insert_meta inserts a metadata Object into the bucket

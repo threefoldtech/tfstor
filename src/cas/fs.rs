@@ -9,8 +9,8 @@ use super::{
 use crate::metrics::SharedMetrics;
 
 use crate::metastore::{
-    BaseMetaTree, BlockID, BlockTree, BucketMeta, BucketTreeExt, Durability, FjallStore,
-    FjallStoreNotx, MetaError, MetaStore, Object, ObjectData,
+    BaseMetaTree, BlockID, BlockTree, BucketMeta, Durability, FjallStore, FjallStoreNotx,
+    MetaError, MetaStore, MetaTreeExt, Object, ObjectData,
 };
 
 use faster_hex::hex_string;
@@ -173,7 +173,7 @@ impl CasFS {
     pub fn get_bucket(
         &self,
         bucket_name: &str,
-    ) -> Result<Box<dyn BucketTreeExt + Send + Sync>, MetaError> {
+    ) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
         self.meta_store.get_bucket_ext(bucket_name)
     }
 
@@ -255,8 +255,8 @@ impl CasFS {
 
         // removes all objects in the bucket
         let bucket = self.meta_store.get_bucket_ext(bucket_name)?;
-        for key in bucket.get_bucket_keys() {
-            let key = key?;
+        for key_val in bucket.iter_all() {
+            let (key, _) = key_val?;
             self.delete_object(
                 bucket_name,
                 std::str::from_utf8(&key).expect("keys are valid utf-8"),
@@ -795,8 +795,10 @@ mod tests {
 
         // Initial refcount must be 1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        let stored_block = block_tree.get_block(&obj.blocks()[0]).unwrap().unwrap();
-        assert_eq!(stored_block.rc(), 1);
+        for id in obj.blocks() {
+            let block = block_tree.get_block(id).unwrap().unwrap();
+            assert_eq!(block.rc(), 1);
+        }
 
         {
             // Test using  the same key
@@ -857,9 +859,7 @@ mod tests {
 
         // Create test data and stream
         let test_data = b"test data".to_vec();
-        let stream = ByteStream::new(stream::once(
-            async move { Ok(Bytes::from(test_data.clone())) },
-        ));
+        let stream = ByteStream::new(stream::once(async move { Ok(Bytes::from(test_data)) }));
 
         // Store object
         let obj = fs
@@ -929,9 +929,7 @@ mod tests {
         // Create test data
         let test_data = b"test data".to_vec();
         let test_data2 = test_data.clone();
-        let stream1 = ByteStream::new(stream::once(
-            async move { Ok(Bytes::from(test_data.clone())) },
-        ));
+        let stream1 = ByteStream::new(stream::once(async move { Ok(Bytes::from(test_data)) }));
 
         // Store first object
         let obj1 = fs
@@ -947,9 +945,7 @@ mod tests {
 
         // Store same data with different key
 
-        let stream2 = ByteStream::new(stream::once(
-            async move { Ok(Bytes::from(test_data2.clone())) },
-        ));
+        let stream2 = ByteStream::new(stream::once(async move { Ok(Bytes::from(test_data2)) }));
 
         let obj2 = fs
             .store_single_object_and_meta(bucket, key2, stream2)
@@ -1010,9 +1006,7 @@ mod tests {
         // Create test data
         let test_data = b"test data".to_vec();
         let test_data2 = test_data.clone();
-        let stream1 = ByteStream::new(stream::once(
-            async move { Ok(Bytes::from(test_data.clone())) },
-        ));
+        let stream1 = ByteStream::new(stream::once(async move { Ok(Bytes::from(test_data)) }));
 
         // Store first object
         let obj1 = fs
@@ -1028,9 +1022,7 @@ mod tests {
 
         // Store same data with same key
 
-        let stream2 = ByteStream::new(stream::once(
-            async move { Ok(Bytes::from(test_data2.clone())) },
-        ));
+        let stream2 = ByteStream::new(stream::once(async move { Ok(Bytes::from(test_data2)) }));
 
         let obj2 = fs
             .store_single_object_and_meta(bucket, key1, stream2)
@@ -1040,7 +1032,7 @@ mod tests {
         // Verify both objects share same blocks
         assert_eq!(obj1.blocks(), obj2.blocks());
         assert_eq!(obj1.hash(), obj2.hash());
-        // Verify blocks  exist with rc=2
+        // Verify blocks  exist with rc=1
         let block_tree = fs.meta_store.get_block_tree().unwrap();
         for id in obj2.blocks() {
             let block = block_tree.get_block(id).unwrap().unwrap();
