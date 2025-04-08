@@ -10,38 +10,34 @@ use tracing::info;
 use uuid::Uuid;
 
 use rusoto_core::ByteStream;
-use s3s::dto::StreamingBlob;
-use s3s::dto::Timestamp;
-use s3s::dto::{
-    Bucket, CompleteMultipartUploadInput, CompleteMultipartUploadOutput, CopyObjectInput,
-    CopyObjectOutput, CreateBucketInput, CreateBucketOutput, CreateMultipartUploadInput,
-    CreateMultipartUploadOutput, DeleteBucketInput, DeleteBucketOutput, DeleteObjectInput,
-    DeleteObjectOutput, DeleteObjectsInput, DeleteObjectsOutput, DeletedObject,
-    GetBucketLocationInput, GetBucketLocationOutput, GetObjectInput, GetObjectOutput,
-    HeadBucketInput, HeadBucketOutput, HeadObjectInput, HeadObjectOutput, ListBucketsInput,
-    ListBucketsOutput, ListObjectsInput, ListObjectsOutput, ListObjectsV2Input,
-    ListObjectsV2Output, PutObjectInput, PutObjectOutput, UploadPartInput, UploadPartOutput,
-};
+use s3s::dto::*;
 use s3s::s3_error;
+
+use s3s::S3Request;
+use s3s::S3Response;
 use s3s::S3Result;
 use s3s::S3;
-use s3s::{S3Request, S3Response};
 
-use crate::cas::{block_stream::BlockStream, range_request::parse_range_request, CasFS};
+use crate::cas::{
+    block_stream::BlockStream,
+    mock_casfs::CasFSTrait,
+    range_request::{parse_range_request, RangeRequest},
+};
 use crate::metastore::{BlockID, ObjectData};
 use crate::metrics::SharedMetrics;
+
+use std::default::Default;
 
 const MAX_KEYS: i32 = 1000;
 
 #[derive(Debug)]
-pub struct S3FS {
-    casfs: CasFS,
+pub struct S3FS<T: CasFSTrait + 'static> {
+    casfs: T,
     metrics: SharedMetrics,
 }
 
-use crate::cas::range_request::RangeRequest;
-impl S3FS {
-    pub fn new(casfs: CasFS, metrics: SharedMetrics) -> Self {
+impl<T: CasFSTrait + 'static> S3FS<T> {
+    pub fn new(casfs: T, metrics: SharedMetrics) -> Self {
         // Get the current amount of buckets
         // FIXME: This is a bit of a hack, we should have a better way to get the amount of buckets
         metrics.set_bucket_count(1); //db.open_tree(BUCKET_META_TREE).unwrap().len());
@@ -76,7 +72,7 @@ fn fmt_content_range(start: u64, end_inclusive: u64, size: u64) -> String {
 }
 
 #[async_trait::async_trait]
-impl S3 for S3FS {
+impl<T: CasFSTrait + 'static> S3 for S3FS<T> {
     async fn complete_multipart_upload(
         &self,
         req: S3Request<CompleteMultipartUploadInput>,
@@ -744,5 +740,104 @@ fn decode_continuation_token(rt: Option<&str>) -> Result<Option<String>, s3s::S3
             .map_err(|_| s3_error!(InvalidToken, "continuation token is invalid"))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cas::mock_casfs::{CasFSTrait, MockCasFS};
+    use once_cell::sync::Lazy;
+    use s3s::S3ErrorCode::NoSuchBucket;
+    use std::sync::Arc;
+    static METRICS: Lazy<SharedMetrics> = Lazy::new(|| SharedMetrics::new());
+
+    // Test that demonstrates how to mock CasFS for negative testing
+    #[tokio::test]
+    async fn test_mock_casfs_for_negative_testing() {
+        //let _metrics = SharedMetrics::new();
+        let mock_casfs = Arc::new(MockCasFS::new());
+
+        // Initially, methods should succeed (not fail)
+        assert!(!*mock_casfs.get_object_paths_fails.lock().unwrap());
+        assert!(!*mock_casfs
+            .store_single_object_and_meta_fails
+            .lock()
+            .unwrap());
+
+        // Configure the mock to fail for specific methods
+        mock_casfs.set_method_fails("get_object_paths", true);
+        mock_casfs.set_method_fails("store_single_object_and_meta", true);
+
+        // Verify the methods are now set to fail
+        assert!(*mock_casfs.get_object_paths_fails.lock().unwrap());
+        assert!(*mock_casfs
+            .store_single_object_and_meta_fails
+            .lock()
+            .unwrap());
+
+        // Example of how you would use this in a real test:
+        // 1. Call a method that uses get_object_paths internally
+        let result = mock_casfs.get_object_paths("bucket", "key");
+
+        // 2. Verify it fails as expected
+        assert!(result.is_err());
+
+        // Example of testing an async method
+        let result = mock_casfs
+            .store_single_object_and_meta(
+                "bucket",
+                "key",
+                ByteStream::new(futures::stream::empty()),
+            )
+            .await;
+
+        // Verify the async method fails as expected
+        assert!(result.is_err());
+
+        // This demonstrates how you can use MockCasFS to test negative cases
+        // in your S3FS implementation
+    }
+
+    #[tokio::test]
+    async fn test_s3fs_get_object_failed_meta() {
+        let metrics = METRICS.clone();
+        let mock_casfs = MockCasFS::new();
+        mock_casfs.set_method_fails("get_object_paths", true);
+
+        let s3fs = S3FS::new(mock_casfs, metrics);
+
+        let input = s3s::dto::GetObjectInput {
+            bucket: "bucket".to_string(),
+            key: "key".to_string(),
+            range: None,
+            part_number: None,
+            response_cache_control: None,
+            response_content_disposition: None,
+            response_content_encoding: None,
+            response_content_language: None,
+            response_content_type: None,
+            response_expires: None,
+            sse_customer_algorithm: None,
+            sse_customer_key: None,
+            sse_customer_key_md5: None,
+            request_payer: None,
+            version_id: None,
+            checksum_mode: None,
+            expected_bucket_owner: None,
+            if_match: None,
+            if_modified_since: None,
+            if_none_match: None,
+            if_unmodified_since: None,
+        };
+        let result = s3fs.get_object(S3Request::new(input)).await;
+
+        // First assert that we got an error
+        assert!(result.is_err());
+
+        // Then check the error code is ServiceUnavailable
+        if let Err(err) = result {
+            assert_eq!(*err.code(), NoSuchBucket);
+        }
     }
 }

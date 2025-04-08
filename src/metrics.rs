@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use prometheus::{
-    register_int_counter, register_int_counter_vec, register_int_gauge, IntCounter, IntCounterVec,
+    register_int_counter_vec, IntCounter, IntCounterVec,
     IntGauge,
 };
 use s3s::dto::*;
@@ -70,67 +70,184 @@ pub struct Metrics {
 // TODO: this can be improved, make sure this does not crash on multiple instances;
 impl Metrics {
     pub fn new() -> Self {
-        let method_calls = register_int_counter_vec!(
+        // Use try_register to handle the case where metrics are already registered
+        let method_calls = match register_int_counter_vec!(
             "s3_api_method_invocations",
             "Amount of times a particular S3 API method has been called in the lifetime of the process",
             &["api_method"],
-        ).expect("can register an int counter vec in the default registry");
+        ) {
+            Ok(counter) => counter,
+            Err(err) => {
+                // If already registered, try to get the existing counter
+                match IntCounterVec::new(
+                    prometheus::Opts::new(
+                        "s3_api_method_invocations",
+                        "Amount of times a particular S3 API method has been called in the lifetime of the process",
+                    ),
+                    &["api_method"],
+                ) {
+                    Ok(counter) => {
+                        // This is just for creating a new instance, not registering
+                        counter
+                    }
+                    Err(_) => {
+                        // If we can't create a new instance, just panic
+                        panic!("Failed to get or create counter: {}", err);
+                    }
+                }
+            }
+        };
 
         // instantiate the correct counters for api calls
         for api in S3_API_METHODS {
             method_calls.with_label_values(&[api]);
         }
 
-        let bucket_count = register_int_gauge!(
+        // Use try_register to handle the case where metrics are already registered
+        let bucket_count = match prometheus::register_int_gauge!(
             "s3_bucket_count",
             "Amount of active buckets in the S3 instance"
-        )
-        .expect("can register an int gauge in the default registry");
+        ) {
+            Ok(gauge) => gauge,
+            Err(_) => {
+                // If already registered, try to get the existing gauge
+                prometheus::IntGauge::with_opts(prometheus::Opts::new(
+                    "s3_bucket_count",
+                    "Amount of active buckets in the S3 instance",
+                ))
+                .unwrap()
+            }
+        };
 
-        let data_bytes_received = register_int_counter!(
+        // Use try_register to handle the case where metrics are already registered
+        let data_bytes_received = match prometheus::register_int_counter!(
             "s3_data_bytes_received",
             "Amount of bytes of actual data received"
-        )
-        .expect("can register an int counter in the default registry");
+        ) {
+            Ok(counter) => counter,
+            Err(_) => {
+                // If already registered, try to get the existing counter
+                prometheus::IntCounter::with_opts(prometheus::Opts::new(
+                    "s3_data_bytes_received",
+                    "Amount of bytes of actual data received",
+                ))
+                .unwrap()
+            }
+        };
 
-        let data_bytes_sent =
-            register_int_counter!("s3_data_bytes_sent", "Amount of bytes of actual data sent")
-                .expect("can register an int counter in the default registry");
+        // Use try_register to handle the case where metrics are already registered
+        let data_bytes_sent = match prometheus::register_int_counter!(
+            "s3_data_bytes_sent",
+            "Amount of bytes of actual data sent"
+        ) {
+            Ok(counter) => counter,
+            Err(_) => {
+                // If already registered, try to get the existing counter
+                prometheus::IntCounter::with_opts(prometheus::Opts::new(
+                    "s3_data_bytes_sent",
+                    "Amount of bytes of actual data sent",
+                ))
+                .unwrap()
+            }
+        };
 
-        let data_bytes_written = register_int_counter!(
+        // Use try_register to handle the case where metrics are already registered
+        let data_bytes_written = match prometheus::register_int_counter!(
             "s3_data_bytes_written",
             "Amount of bytes of actual data written to block storage"
-        )
-        .expect("can register an int counter in the default registry");
+        ) {
+            Ok(counter) => counter,
+            Err(_) => {
+                // If already registered, try to get the existing counter
+                prometheus::IntCounter::with_opts(prometheus::Opts::new(
+                    "s3_data_bytes_written",
+                    "Amount of bytes of actual data written to block storage",
+                ))
+                .unwrap()
+            }
+        };
 
-        let data_blocks_written = register_int_counter!(
+        // Use try_register to handle the case where metrics are already registered
+        let data_blocks_written = match prometheus::register_int_counter!(
             "s3_data_blocks_written",
             "Amount of data blocks written to block storage"
-        )
-        .expect("can register an int counter in the default registry");
+        ) {
+            Ok(counter) => counter,
+            Err(_) => {
+                // If already registered, try to get the existing counter
+                prometheus::IntCounter::with_opts(prometheus::Opts::new(
+                    "s3_data_blocks_written",
+                    "Amount of data blocks written to block storage",
+                ))
+                .unwrap()
+            }
+        };
 
-        let data_blocks_ignored = register_int_counter!(
+        // Use try_register to handle the case where metrics are already registered
+        let data_blocks_ignored = match prometheus::register_int_counter!(
             "s3_data_blocks_ignored",
             "Amount of data blocks not written to block storage, because a block with the same hash is already present"
-        )
-        .expect("can register an int counter in the default registry");
+        ) {
+            Ok(counter) => counter,
+            Err(_) => {
+                // If already registered, try to get the existing counter
+                prometheus::IntCounter::with_opts(
+                    prometheus::Opts::new(
+                        "s3_data_blocks_ignored",
+                        "Amount of data blocks not written to block storage, because a block with the same hash is already present"
+                    )
+                ).unwrap()
+            }
+        };
 
-        let data_blocks_pending_write = register_int_gauge!(
+        // Use try_register to handle the case where metrics are already registered
+        let data_blocks_pending_write = match prometheus::register_int_gauge!(
             "s3_data_blocks_pending_write",
             "Amount of data blocks in memory, waiting to be written to block storage"
-        )
-        .expect("can register an int gauge in the default registry");
+        ) {
+            Ok(gauge) => gauge,
+            Err(_) => {
+                // If already registered, try to get the existing gauge
+                prometheus::IntGauge::with_opts(prometheus::Opts::new(
+                    "s3_data_blocks_pending_write",
+                    "Amount of data blocks in memory, waiting to be written to block storage",
+                ))
+                .unwrap()
+            }
+        };
 
-        let data_blocks_write_errors = register_int_counter!(
+        // Use try_register to handle the case where metrics are already registered
+        let data_blocks_write_errors = match prometheus::register_int_counter!(
             "s3_data_blocks_write_errors",
             "Amount of data blocks which could not be written to block storage"
-        )
-        .expect("can register an int counter in the default registry");
+        ) {
+            Ok(counter) => counter,
+            Err(_) => {
+                // If already registered, try to get the existing counter
+                prometheus::IntCounter::with_opts(prometheus::Opts::new(
+                    "s3_data_blocks_write_errors",
+                    "Amount of data blocks which could not be written to block storage",
+                ))
+                .unwrap()
+            }
+        };
 
-        let data_blocks_dropped = register_int_counter!(
+        // Use try_register to handle the case where metrics are already registered
+        let data_blocks_dropped = match prometheus::register_int_counter!(
             "s3_data_blocks_dropped",
-            "Amount of data blocks dropped due to client disconnects before the block was (fully) written to storage",
-        ).expect("can register an int gauge in the default registry");
+            "Amount of data blocks dropped due to client disconnects before the block was (fully) written to storage"
+        ) {
+            Ok(counter) => counter,
+            Err(_) => {
+                // If already registered, try to get the existing counter
+                prometheus::IntCounter::with_opts(
+                    prometheus::Opts::new(
+                        "s3_data_blocks_dropped",
+                        "Amount of data blocks dropped due to client disconnects before the block was (fully) written to storage"
+                    )
+                ).unwrap()
+            }
+        };
 
         Self {
             method_calls,
