@@ -323,9 +323,9 @@ impl<T: CasFSTrait + 'static> S3 for S3FS<T> {
             bucket, key, range, ..
         } = input;
 
-        //if !try_!(self.casfs.bucket_exists(&bucket)) {
-        //    return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
-        //}
+        if !try_!(self.casfs.bucket_exists(&bucket)) {
+            return Err(s3_error!(NoSuchBucket, "Bucket does not exist"));
+        }
 
         // load metadata
 
@@ -748,7 +748,7 @@ mod tests {
     use super::*;
     use crate::cas::mock_casfs::{CasFSTrait, MockCasFS};
     use once_cell::sync::Lazy;
-    use s3s::S3ErrorCode::ServiceUnavailable;
+    use s3s::S3ErrorCode::NoSuchBucket;
     use std::sync::Arc;
     static METRICS: Lazy<SharedMetrics> = Lazy::new(|| SharedMetrics::new());
 
@@ -837,7 +837,7 @@ mod tests {
 
         // Then check the error code is ServiceUnavailable
         if let Err(err) = result {
-            assert_eq!(*err.code(), ServiceUnavailable);
+            assert_eq!(*err.code(), NoSuchBucket);
         }
     }
 }
