@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::cas::StorageEngine;
-use crate::metastore::{FjallStore, FjallStoreNotx, MetaStore};
+use metastore::{FjallStore, FjallStoreNotx, MetaStore};
 
 pub fn num_keys(meta_root: PathBuf, storage_engine: StorageEngine) -> Result<usize> {
     let meta_store = match storage_engine {

@@ -3,9 +3,7 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fjall;
-
-use crate::metastore::{
+use crate::{
     BaseMetaTree, Durability, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
     TransactionBackend,
 };
@@ -240,7 +238,6 @@ impl BaseMetaTree for FjallTree {
         }
     }
 
-    #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError> {
         let read_tx = self.keyspace.read_tx();
         let len = read_tx
@@ -348,7 +345,7 @@ impl MetaTreeExt for FjallTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metastore::stores::test_utils;
+    use crate::stores::test_utils;
     use tempfile::tempdir;
 
     fn setup_store() -> (FjallStore, tempfile::TempDir) {

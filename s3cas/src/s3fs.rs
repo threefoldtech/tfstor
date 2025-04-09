@@ -28,7 +28,7 @@ use s3s::S3;
 use s3s::{S3Request, S3Response};
 
 use crate::cas::{block_stream::BlockStream, range_request::parse_range_request, CasFS};
-use crate::metastore::{BlockID, ObjectData};
+use metastore::{BlockID, ObjectData};
 use crate::metrics::SharedMetrics;
 
 const MAX_KEYS: i32 = 1000;

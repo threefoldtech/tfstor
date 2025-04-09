@@ -1,4 +1,4 @@
-use crate::metastore::{BaseMetaTree, BlockID, MetaTreeExt, MetaError, Object, ObjectData};
+use crate::{BaseMetaTree, BlockID, MetaTreeExt, MetaError, Object, ObjectData};
 
 pub trait TestStore {
     fn tree_open(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError>;

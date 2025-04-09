@@ -7,6 +7,7 @@ use super::{object::Object, MetaError, Transaction};
 ///
 /// This trait provides the fundamental operations needed to interact with a key-value
 /// storage system, including inserting, removing, and retrieving values.
+#[allow(clippy::len_without_is_empty)]
 pub trait BaseMetaTree: Send + Sync {
     /// Inserts a key-value pair into the tree.
     ///
@@ -47,11 +48,8 @@ pub trait BaseMetaTree: Send + Sync {
 
     /// Returns the number of key-value pairs in the tree.
     ///
-    /// This method is only available in test builds.
-    ///
     /// # Returns
     /// * `Result<usize, MetaError>` - The number of entries or an error
-    #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError>;
 }
 

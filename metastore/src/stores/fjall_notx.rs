@@ -3,9 +3,7 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fjall;
-
-use crate::metastore::{
+use crate::{
     BaseMetaTree, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
     TransactionBackend,
 };
@@ -188,7 +186,6 @@ impl BaseMetaTree for FjallTreeNotx {
         }
     }
 
-    #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError> {
         let len = self
             .partition
@@ -294,7 +291,7 @@ impl MetaTreeExt for FjallTreeNotx {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metastore::stores::test_utils;
+    use crate::stores::test_utils;
     use tempfile::tempdir;
 
     impl test_utils::TestStore for FjallStoreNotx {
