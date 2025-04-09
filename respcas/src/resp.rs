@@ -1,5 +1,4 @@
-use bytes::Bytes;
-use redis_protocol::resp2::types::Frame;
+use redis_protocol::resp2::types::OwnedFrame as Frame;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,9 +20,9 @@ impl RespHelper {
             return Ok(None);
         }
 
-        // Convert to Bytes for the redis-protocol crate
-        let bytes = Bytes::copy_from_slice(buffer);
-        match redis_protocol::resp2::decode::decode(&bytes) {
+        // For redis-protocol 6.0.0, we'll use the regular decode function
+        // since we're working with a byte slice
+        match redis_protocol::resp2::decode::decode(buffer) {
             Ok(Some((frame, len))) => {
                 // Return the frame and how many bytes were consumed
                 Ok(Some((frame, len)))
@@ -55,7 +54,7 @@ impl RespHelper {
         let mut buffer = vec![0; estimated_size];
 
         // Try to encode with the current buffer size
-        match redis_protocol::resp2::encode::encode(&mut buffer, 0, frame) {
+        match redis_protocol::resp2::encode::encode(&mut buffer, frame, false) {
             Ok(len) => {
                 buffer.truncate(len);
                 Ok(buffer)
@@ -64,7 +63,7 @@ impl RespHelper {
                 if e.to_string().contains("Buffer too small") {
                     // If buffer is too small, try with a much larger buffer
                     let mut larger_buffer = vec![0; 16384]; // 16KB should be enough for most responses
-                    let len = redis_protocol::resp2::encode::encode(&mut larger_buffer, 0, frame)
+                    let len = redis_protocol::resp2::encode::encode(&mut larger_buffer, frame, false)
                         .map_err(|e| RespError::Protocol(e.to_string()))?;
                     larger_buffer.truncate(len);
                     Ok(larger_buffer)

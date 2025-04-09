@@ -15,7 +15,7 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-redis-protocol = "4.1.0"
+redis-protocol = { version = "6.0.0", features = ["bytes"] }
 atoi = "2.0.0"
 thiserror = "1.0.56"
 

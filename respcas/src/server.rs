@@ -2,7 +2,7 @@ use crate::cmd::{Command, CommandHandler};
 use crate::resp::RespHelper;
 use crate::storage::MetaStorage;
 use anyhow::Result;
-use redis_protocol::resp2::types::Frame;
+use redis_protocol::resp2::types::OwnedFrame as Frame;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -75,7 +75,7 @@ async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
                         Ok(cmd) => handler.execute(cmd).await,
                         Err(e) => {
                             error!("Error parsing command: {}", e);
-                            Frame::Error(format!("Error: {}", e).into())
+                            Frame::Error(format!("Error: {}", e))
                         }
                     };
 
