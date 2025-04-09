@@ -48,13 +48,12 @@ impl RespHelper {
         // Estimate the frame size - for COMMAND responses, we need a much larger buffer
         let estimated_size = match frame {
             Frame::Array(items) if items.len() > 10 => 4096, // Large arrays like COMMAND response
-            _ => 512, // Default size for most responses
+            _ => 512,                                        // Default size for most responses
         };
-        
-        // Use Vec<u8> for encoding with a larger capacity
-        let mut buffer = Vec::with_capacity(estimated_size);
-        buffer.resize(estimated_size, 0);
-        
+
+        // Use Vec<u8> for encoding with zeros already in place
+        let mut buffer = vec![0; estimated_size];
+
         // Try to encode with the current buffer size
         match redis_protocol::resp2::encode::encode(&mut buffer, 0, frame) {
             Ok(len) => {
@@ -64,8 +63,7 @@ impl RespHelper {
             Err(e) => {
                 if e.to_string().contains("Buffer too small") {
                     // If buffer is too small, try with a much larger buffer
-                    let mut larger_buffer = Vec::with_capacity(16384); // 16KB should be enough for most responses
-                    larger_buffer.resize(16384, 0);
+                    let mut larger_buffer = vec![0; 16384]; // 16KB should be enough for most responses
                     let len = redis_protocol::resp2::encode::encode(&mut larger_buffer, 0, frame)
                         .map_err(|e| RespError::Protocol(e.to_string()))?;
                     larger_buffer.truncate(len);
