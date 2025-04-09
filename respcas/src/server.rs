@@ -2,11 +2,11 @@ use crate::cmd::{Command, CommandHandler};
 use crate::resp::RespHelper;
 use crate::storage::MetaStorage;
 use anyhow::Result;
+use redis_protocol::resp2::types::Frame;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, error, info};
-use redis_protocol::resp2::types::Frame;
 
 pub async fn run(addr: String, storage: MetaStorage) -> Result<()> {
     // Create a TCP listener
@@ -21,10 +21,10 @@ pub async fn run(addr: String, storage: MetaStorage) -> Result<()> {
         match listener.accept().await {
             Ok((socket, addr)) => {
                 info!("Accepted connection from: {}", addr);
-                
+
                 // Clone the storage for this connection
                 let storage = Arc::clone(&storage);
-                
+
                 // Spawn a new task to handle this connection
                 tokio::spawn(async move {
                     if let Err(e) = process(socket, storage).await {
@@ -51,7 +51,7 @@ async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
     loop {
         // Read data from the socket
         let n = match socket.read(&mut buffer).await {
-            Ok(n) if n == 0 => break, // Connection closed
+            Ok(0) => break, // Connection closed
             Ok(n) => n,
             Err(e) => {
                 error!("Error reading from socket: {}", e);
