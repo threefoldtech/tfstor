@@ -32,11 +32,11 @@ jobs:
         override: true
 
     - name: Build
-      run: cargo build
+      run: cargo build --workspace
 
     - uses: actions/checkout@v4
     - name: Run clippy
-      run: cargo clippy --all-features -- -Dwarnings
+      run: cargo clippy --workspace --all-features -- -Dwarnings
 
     - name: Run tests
-      run: cargo test
+      run: cargo test --workspace

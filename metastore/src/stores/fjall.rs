@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use fjall;
 
-use crate::metastore::{
+use crate::{
     BaseMetaTree, Durability, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
     TransactionBackend,
 };
@@ -348,7 +348,7 @@ impl MetaTreeExt for FjallTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metastore::stores::test_utils;
+    use crate::stores::test_utils;
     use tempfile::tempdir;
 
     fn setup_store() -> (FjallStore, tempfile::TempDir) {

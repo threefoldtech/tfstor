@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use fjall;
 
-use crate::metastore::{
+use crate::{
     BaseMetaTree, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
     TransactionBackend,
 };
@@ -294,7 +294,7 @@ impl MetaTreeExt for FjallTreeNotx {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metastore::stores::test_utils;
+    use crate::stores::test_utils;
     use tempfile::tempdir;
 
     impl test_utils::TestStore for FjallStoreNotx {

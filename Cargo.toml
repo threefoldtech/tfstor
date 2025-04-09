@@ -1,19 +1,17 @@
-[package]
-name = "s3-cas"
+[workspace]
+members = [
+    "metastore",
+    "s3cas",
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2018"
 authors = ["Lee Smet <lee.smet@hotmail.com>"]
 readme = "README.md"
-description = "An experimental S3 server using a cas storage layer"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[features]
-default = []
-vendored = ["openssl"]
-asm = ["md-5/asm"]
-
-
-[dependencies]
+[workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 fjall = "2.5"
 async-trait = "0.1"
@@ -25,30 +23,19 @@ uuid = { version = "1.12", features = ["v4"] }
 chrono = "0.4"
 anyhow = { version = "1.0.95" }
 dotenv = { version = "0.15" }
-openssl = { version = "0.10.68", features = ["vendored"], optional = true }
+openssl = { version = "0.10.68", features = ["vendored"] }
 prometheus = { version = "0.13.4", features = ["process"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 s3s = { git = "https://github.com/Nugine/s3s" }
 bytes = "1.7.1"
-hyper-util = { version = "0.1.9", features = [
-    "server-auto",
-    "server-graceful",
-    "http1",
-    "http2",
-    "tokio",
-] }
+hyper-util = { version = "0.1.9", features = ["server-auto", "server-graceful", "http1", "http2", "tokio"] }
 rusoto_core = "0.48.0"
 hyper = { version = "1.6.0" }
 http-body-util = "0.1.2"
 clap = { version = "4.5.32", features = ["derive"] }
 
-
-[profile.release]
-lto = true
-codegen-units = 1
-
-[dev-dependencies]
+# Dev dependencies
 s3s-aws = { git = "https://github.com/Nugine/s3s", package = "s3s-aws" }
 aws-config = { version = "1.5.8", default-features = false }
 aws-credential-types = { version = "1.2.1", features = ["test-util"] }
@@ -60,12 +47,6 @@ env_logger = "0.11.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.8"
 
-[[bench]]
-name = "fjall_benchmark"
-harness = false
-path = "benches/fjall_benchmark.rs"
-
-[[bench]]
-name = "casfs_benchmark"
-harness = false
-path = "benches/casfs_benchmark.rs"
+[profile.release]
+lto = true
+codegen-units = 1

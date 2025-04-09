@@ -1,6 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 
-use crate::metastore::{BaseMetaTree, BlockID, FsError, MetaError, BLOCKID_SIZE, PTR_SIZE};
+use metastore::{BaseMetaTree, BlockID, FsError, MetaError, BLOCKID_SIZE, PTR_SIZE};
 
 #[derive(Debug)]
 pub struct MultiPart {

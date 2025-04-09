@@ -1,0 +1,58 @@
+[package]
+name = "s3cas"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+description = "An experimental S3 server using a cas storage layer"
+
+[features]
+default = []
+vendored = ["openssl"]
+asm = ["md-5/asm"]
+
+[dependencies]
+metastore = { path = "../metastore" }
+tokio = { workspace = true }
+fjall = { workspace = true }
+async-trait = { workspace = true }
+md-5 = { workspace = true }
+futures = { workspace = true }
+async-fs = { workspace = true }
+faster-hex = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+dotenv = { workspace = true }
+openssl = { workspace = true, optional = true }
+prometheus = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+s3s = { workspace = true }
+bytes = { workspace = true }
+hyper-util = { workspace = true }
+rusoto_core = { workspace = true }
+hyper = { workspace = true }
+http-body-util = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+s3s-aws = { workspace = true }
+aws-config = { workspace = true }
+aws-credential-types = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+once_cell = { workspace = true }
+tempfile = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+criterion = { workspace = true }
+rand = { workspace = true }
+
+[[bench]]
+name = "fjall_benchmark"
+harness = false
+path = "../benches/fjall_benchmark.rs"
+
+[[bench]]
+name = "casfs_benchmark"
+harness = false
+path = "../benches/casfs_benchmark.rs"

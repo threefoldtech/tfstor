@@ -8,7 +8,7 @@ use super::{
 };
 use crate::metrics::SharedMetrics;
 
-use crate::metastore::{
+use metastore::{
     BaseMetaTree, BlockID, BlockTree, BucketMeta, Durability, FjallStore, FjallStoreNotx,
     MetaError, MetaStore, MetaTreeExt, Object, ObjectData,
 };

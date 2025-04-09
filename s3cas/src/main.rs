@@ -8,11 +8,11 @@ use prometheus::Encoder;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use s3_cas::cas::{CasFS, StorageEngine};
-use s3_cas::check::{check_integrity, CheckConfig};
-use s3_cas::inspect::{disk_space, num_keys};
-use s3_cas::metastore::Durability;
-use s3_cas::retrieve::{retrieve, RetrieveConfig};
+use s3cas::cas::{CasFS, StorageEngine};
+use s3cas::check::{check_integrity, CheckConfig};
+use s3cas::inspect::{disk_space, num_keys};
+use s3cas::metastore::Durability;
+use s3cas::retrieve::{retrieve, RetrieveConfig};
 
 #[derive(Parser)]
 #[command(version)]
@@ -146,7 +146,7 @@ async fn run(args: ServerConfig) -> anyhow::Result<()> {
     let storage_engine = args.metadata_db;
 
     // provider
-    let metrics = s3_cas::metrics::SharedMetrics::new();
+    let metrics = s3cas::metrics::SharedMetrics::new();
     let casfs = CasFS::new(
         args.fs_root.clone(),
         args.meta_root.clone(),
@@ -155,8 +155,8 @@ async fn run(args: ServerConfig) -> anyhow::Result<()> {
         args.inline_metadata_size,
         Some(args.durability),
     );
-    let s3fs = s3_cas::s3fs::S3FS::new(casfs, metrics.clone());
-    let s3fs = s3_cas::metrics::MetricFs::new(s3fs, metrics.clone());
+    let s3fs = s3cas::s3fs::S3FS::new(casfs, metrics.clone());
+    let s3fs = s3cas::metrics::MetricFs::new(s3fs, metrics.clone());
 
     // Setup S3 service
     let service = {
