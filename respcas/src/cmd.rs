@@ -1,6 +1,6 @@
 use crate::storage::MetaStorage;
 use bytes::Bytes;
-use redis_protocol::resp2::types::Frame;
+use redis_protocol::resp2::types::OwnedFrame as Frame;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error};
@@ -118,7 +118,7 @@ impl Command {
                             }
                         };
                         let value = match &array[2] {
-                            Frame::BulkString(bytes) => bytes.clone(),
+                            Frame::BulkString(bytes) => Bytes::from(bytes.clone()),
                             _ => {
                                 return Err(CommandError::Protocol(
                                     "SET value must be a bulk string".to_string(),
@@ -181,11 +181,11 @@ impl CommandHandler {
     async fn handle_get(&self, key: String) -> Frame {
         debug!("Handling GET command for key: {}", key);
         match self.storage.get(&key).await {
-            Ok(Some(value)) => Frame::BulkString(Bytes::from(value)),
+            Ok(Some(value)) => Frame::BulkString(value.to_vec()),
             Ok(None) => Frame::Null,
             Err(e) => {
                 error!("Error getting key {}: {}", key, e);
-                Frame::Error(format!("ERR {}", e).into())
+                Frame::Error(format!("ERR {}", e))
             }
         }
     }
@@ -197,7 +197,7 @@ impl CommandHandler {
             Ok(()) => Frame::SimpleString("OK".into()),
             Err(e) => {
                 error!("Error setting key {}: {}", key, e);
-                Frame::Error(format!("ERR {}", e).into())
+                Frame::Error(format!("ERR {}", e))
             }
         }
     }
@@ -205,7 +205,7 @@ impl CommandHandler {
     /// Handle PING command
     fn handle_ping(&self, message: Option<String>) -> Frame {
         match message {
-            Some(msg) => Frame::BulkString(Bytes::from(msg.into_bytes())),
+            Some(msg) => Frame::BulkString(msg.into_bytes()),
             None => Frame::SimpleString("PONG".into()),
         }
     }
@@ -308,7 +308,7 @@ impl CommandHandler {
             Ok(()) => Frame::Integer(1), // Successfully deleted 1 key
             Err(e) => {
                 error!("Error deleting key {}: {}", key, e);
-                Frame::Error(format!("ERR {}", e).into())
+                Frame::Error(format!("ERR {}", e))
             }
         }
     }
@@ -326,7 +326,7 @@ impl CommandHandler {
             }
             Err(e) => {
                 error!("Error checking if key {} exists: {}", key, e);
-                Frame::Error(format!("ERR {}", e).into())
+                Frame::Error(format!("ERR {}", e))
             }
         }
     }
