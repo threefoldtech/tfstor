@@ -1,0 +1,26 @@
+[package]
+name = "respcas"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+description = "A Redis-compatible server using metastore as backend"
+
+[dependencies]
+metastore = { path = "../metastore" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+redis-protocol = "4.1.0"
+atoi = "2.0.0"
+thiserror = "1.0.56"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+rand = { workspace = true }
