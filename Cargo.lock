@@ -2126,6 +2126,7 @@ dependencies = [
  "fjall",
  "futures",
  "md-5 0.10.6",
+ "tempfile",
  "tracing",
  "uuid",
 ]

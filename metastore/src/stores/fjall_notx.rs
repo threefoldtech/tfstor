@@ -3,8 +3,6 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fjall;
-
 use crate::{
     BaseMetaTree, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
     TransactionBackend,
@@ -188,7 +186,6 @@ impl BaseMetaTree for FjallTreeNotx {
         }
     }
 
-    #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError> {
         let len = self
             .partition

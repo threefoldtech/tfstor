@@ -3,8 +3,6 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fjall;
-
 use crate::{
     BaseMetaTree, Durability, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
     TransactionBackend,
@@ -240,7 +238,6 @@ impl BaseMetaTree for FjallTree {
         }
     }
 
-    #[cfg(test)]
     fn len(&self) -> Result<usize, MetaError> {
         let read_tx = self.keyspace.read_tx();
         let len = read_tx

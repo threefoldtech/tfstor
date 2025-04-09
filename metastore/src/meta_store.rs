@@ -362,11 +362,9 @@ impl BlockTree {
 
     /// Returns the number of blocks in the tree.
     ///
-    /// This method is only available in test builds.
-    ///
     /// # Returns
     /// The number of blocks or an error
-    #[cfg(test)]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> Result<usize, MetaError> {
         self.tree.len()
     }
