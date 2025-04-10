@@ -3,9 +3,9 @@ use clap::Parser;
 use std::path::PathBuf;
 use tracing::info;
 
-mod server;
 mod cmd;
 mod resp;
+mod server;
 mod storage;
 
 #[derive(Parser, Debug)]
@@ -35,8 +35,7 @@ async fn main() -> Result<()> {
 
     // Parse command line arguments
     let opt = Opt::parse();
-    
-    info!("Starting respcas server on {}:{}", opt.host, opt.port);
+
     info!("Data directory: {:?}", opt.data_dir);
     info!("Inlined metadata size: {:?}", opt.inlined_metadata_size);
 
@@ -46,12 +45,10 @@ async fn main() -> Result<()> {
     }
 
     // Initialize storage
-    let storage = storage::MetaStorage::new(
-        opt.data_dir.clone(),
-        opt.inlined_metadata_size,
-    );
+    let storage = storage::MetaStorage::new(opt.data_dir.clone(), opt.inlined_metadata_size);
 
     // Start server
+    info!("Starting respcas server on {}:{}", opt.host, opt.port);
     let addr = format!("{}:{}", opt.host, opt.port);
     server::run(addr, storage).await
 }
