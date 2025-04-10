@@ -5,6 +5,15 @@ edition = { workspace = true }
 authors = { workspace = true }
 description = "A Redis-compatible server using metastore as backend"
 
+# Expose the modules as a library
+[lib]
+name = "respcas"
+path = "src/lib.rs"
+
+[[bin]]
+name = "respcas"
+path = "src/main.rs"
+
 [dependencies]
 metastore = { path = "../metastore" }
 tokio = { workspace = true }
@@ -24,3 +33,4 @@ tempfile = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 rand = { workspace = true }
+redis = { version = "0.23.0" }

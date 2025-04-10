@@ -40,7 +40,7 @@ pub async fn run(addr: String, storage: MetaStorage) -> Result<()> {
     }
 }
 
-async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()> {
+pub async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()> {
     // Create a command handler
     let handler = CommandHandler::new(storage);
 
