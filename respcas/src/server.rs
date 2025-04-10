@@ -2,6 +2,7 @@ use crate::cmd::{Command, CommandHandler};
 use crate::resp::RespHelper;
 use crate::storage::MetaStorage;
 use anyhow::Result;
+use bytes::BytesMut;
 use redis_protocol::resp2::types::OwnedFrame as Frame;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -43,14 +44,14 @@ async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
     // Create a command handler
     let handler = CommandHandler::new(storage);
 
-    // Buffer for reading data
-    let mut buffer = vec![0u8; 4096];
-    let mut data = Vec::new();
+    // Use BytesMut for zero-copy operations
+    let mut buffer = BytesMut::with_capacity(4096);
 
     // Process commands
     loop {
-        // Read data from the socket
-        let n = match socket.read(&mut buffer).await {
+        // Read data directly into BytesMut buffer
+        // This avoids an extra copy compared to using Vec<u8>
+        let _n = match socket.read_buf(&mut buffer).await {
             Ok(0) => break, // Connection closed
             Ok(n) => n,
             Err(e) => {
@@ -59,13 +60,12 @@ async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
             }
         };
 
-        // Append the read data to our buffer
-        data.extend_from_slice(&buffer[0..n]);
-
-        // Try to parse a frame from the data
+        // No need to append data as we're reading directly into the buffer
+        // Try to parse a frame from the buffer
         let mut pos = 0;
-        while pos < data.len() {
-            match RespHelper::parse_frame(&data[pos..]) {
+        while pos < buffer.len() {
+            // Create a slice starting at the current position
+            match RespHelper::parse_frame(&buffer[pos..]) {
                 Ok(Some((frame, len))) => {
                     debug!("Received frame: {:?}", frame);
                     pos += len;
@@ -101,9 +101,9 @@ async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
             }
         }
 
-        // Remove processed data
+        // Remove processed data using split_to which is zero-copy
         if pos > 0 {
-            data.drain(0..pos);
+            let _ = buffer.split_to(pos); // Ignore the return value as suggested by the compiler
         }
     }
 
