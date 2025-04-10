@@ -1,30 +1,43 @@
-# S3-CAS
+# TFStor
 
-A simple POC implementation of the (basic) S3 API using content addresses storage. The current implementation
-has been running in production for 1.5 years storing some 250M objects.
+This project provides storage solutions using content-addressed storage:  
 
-There is also `refcount` feature which adds reference counting to data blocks.
-With this feature, the data blocks will be deleted when they aren't used anymore.
-
+1. **s3cas** - An S3-compatible API server using content-addressed storage  
+2. **respd** - A Redis-compatible server using metastore as backend
 
 ## Building
 
-To build it yourself, clone the repo and then use the standard rust tools.
-The `vendored` feature can be used if a static binary is needed.
+To build the project, use the standard Rust tools:
 
-```
-git clone https://github.com/leesmet/s3-cas
-cd s3-cas
-cargo build --release --features binary
+```bash
+git clone https://github.com/threefoldtech/tfstor
+cd tfstor
+
+# Build all components
+cargo build --release
+
+# Or build individual components
+cargo build --release -p s3cas
+cargo build --release -p respd
 ```
 
-## Running
+## Running s3cas
 
 ```console
-s3-cas server --access-key=MY_KEY --secret-key=MY_SECRET --fs-root=/tmp/s3/fs --meta-root=/tmp/s3/meta
+s3cas server --access-key=MY_KEY --secret-key=MY_SECRET --fs-root=/tmp/s3/fs --meta-root=/tmp/s3/meta
 ```
 
-## Inline metadata
+## Running respd
+
+```console
+respd --data-dir=/tmp/respd/data
+```
+
+By default, respd listens on 127.0.0.1:6379 and can be accessed using any Redis client.
+
+## s3cas Features
+
+### Inline metadata
 
 Objects smaller than or equal to a configurable threshold can be stored directly in their metadata records,
 improving performance for small objects.
@@ -42,8 +55,25 @@ When the size is set:
 Currently, objects uploaded using the multipart method will never be inlined
 because they are assumed to be large objects.
 
+### Reference Counting
+
+The `refcount` feature adds reference counting to data blocks.
+With this feature, the data blocks will be deleted when they aren't used anymore.
+
+## respd Features
+
+The respd server implements basic Redis commands including:
+- PING
+- SET
+- GET
+- DEL
+- EXISTS
+
 ## Known issues
 
-- Only the basic API is implemented, and even then it is not entirely implemented (for instance copy
-  between servers is not implemented).
-- Single key only, no support to add multiple keys with different permissions.
+### s3cas
+- Only the basic S3 API is implemented (no copy between servers)
+- Single key only, no support to add multiple keys with different permissions
+
+### respd
+- Limited subset of Redis commands implemented
