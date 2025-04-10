@@ -1,5 +1,5 @@
 [package]
-name = "respcas"
+name = "respd"
 version = { workspace = true }
 edition = { workspace = true }
 authors = { workspace = true }
@@ -7,11 +7,11 @@ description = "A Redis-compatible server using metastore as backend"
 
 # Expose the modules as a library
 [lib]
-name = "respcas"
+name = "respd"
 path = "src/lib.rs"
 
 [[bin]]
-name = "respcas"
+name = "respd"
 path = "src/main.rs"
 
 [dependencies]

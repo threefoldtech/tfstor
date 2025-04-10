@@ -9,7 +9,7 @@ mod server;
 mod storage;
 
 #[derive(Parser, Debug)]
-#[clap(name = "respcas", about = "Redis-compatible server using metastore")]
+#[clap(name = "respd", about = "Redis-compatible server using metastore")]
 struct Opt {
     /// Path to the data directory
     #[clap(long, default_value = "./data")]
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
     let storage = storage::MetaStorage::new(opt.data_dir.clone(), opt.inlined_metadata_size);
 
     // Start server
-    info!("Starting respcas server on {}:{}", opt.host, opt.port);
+    info!("Starting respd server on {}:{}", opt.host, opt.port);
     let addr = format!("{}:{}", opt.host, opt.port);
     server::run(addr, storage).await
 }
