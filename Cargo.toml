@@ -2,7 +2,7 @@
 members = [
     "metastore",
     "s3cas",
-    "respcas",
+    "respd",
 ]
 resolver = "2"
 

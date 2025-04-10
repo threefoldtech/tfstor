@@ -25,7 +25,7 @@ impl TestServer {
 
         // Find an available port
         let port = Self::find_available_port();
-        println!("Starting respcas server on port {}", port);
+        println!("Starting respd server on port {}", port);
 
         // Create a shutdown channel
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
@@ -44,7 +44,7 @@ impl TestServer {
                 println!("Listening on: {}", addr);
                 
                 // Create a shared storage instance
-                let storage = Arc::new(respcas::storage::MetaStorage::new(thread_data_dir, None));
+                let storage = Arc::new(respd::storage::MetaStorage::new(thread_data_dir, None));
                 
                 // Convert to tokio TcpListener
                 let listener = tokio::net::TcpListener::from_std(listener).expect("Failed to convert listener");
@@ -72,7 +72,7 @@ impl TestServer {
                                     
                                     // Spawn a new task to handle this connection
                                     tokio::spawn(async move {
-                                        if let Err(e) = respcas::server::process(socket, storage).await {
+                                        if let Err(e) = respd::server::process(socket, storage).await {
                                             eprintln!("Error processing connection: {}", e);
                                         }
                                     });
