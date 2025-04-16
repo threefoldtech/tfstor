@@ -1,10 +1,10 @@
-use crate::storage::MetaStorage;
 use bytes::Bytes;
-use metastore::BaseMetaTree;
 use redis_protocol::resp2::types::OwnedFrame as Frame;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error};
+
+use crate::{namespace::Namespace, storage::Storage};
 
 #[derive(Debug, Error)]
 pub enum CommandError {
@@ -198,16 +198,16 @@ impl Command {
 /// Handler for Redis commands
 pub struct CommandHandler {
     #[allow(dead_code)]
-    storage: Arc<MetaStorage>,
+    storage: Arc<Storage>,
 
-    /// The tree for the current namespace
-    tree: Box<dyn BaseMetaTree>,
+    // Namespace for this connection
+    namespace: Namespace,
 }
 
 impl CommandHandler {
     /// Create a new command handler
-    pub fn new(storage: Arc<MetaStorage>, tree: Box<dyn BaseMetaTree>) -> Self {
-        Self { storage, tree }
+    pub fn new(storage: Arc<Storage>, namespace: Namespace) -> Self {
+        Self { storage, namespace }
     }
 
     /// Execute a command and return the response frame
@@ -229,7 +229,7 @@ impl CommandHandler {
     /// Handle GET command
     async fn handle_get(&self, key: String) -> Frame {
         debug!("Handling GET command for key: {}", key);
-        match self.tree.get(key.as_bytes()) {
+        match self.namespace.get(key.as_bytes()) {
             Ok(Some(value)) => Frame::BulkString(value.to_vec()),
             Ok(None) => Frame::Null,
             Err(e) => {
@@ -246,7 +246,7 @@ impl CommandHandler {
         let mut values = Vec::with_capacity(keys.len());
 
         for key in keys {
-            match self.tree.get(key.as_bytes()) {
+            match self.namespace.get(key.as_bytes()) {
                 Ok(Some(value)) => values.push(Frame::BulkString(value.to_vec())),
                 Ok(None) => values.push(Frame::Null),
                 Err(e) => {
@@ -264,7 +264,7 @@ impl CommandHandler {
     /// Handle SET command
     async fn handle_set(&self, key: String, value: Bytes) -> Frame {
         debug!("Handling SET command for key: {}", key);
-        match self.tree.insert(key.as_bytes(), value.to_vec()) {
+        match self.namespace.set(key.as_bytes(), value) {
             Ok(()) => Frame::SimpleString("OK".into()),
             Err(e) => {
                 error!("Error setting key {}: {}", key, e);
@@ -284,7 +284,7 @@ impl CommandHandler {
     /// Handle DEL command
     async fn handle_del(&self, key: String) -> Frame {
         debug!("Handling DEL command for key: {}", key);
-        match self.tree.remove(key.as_bytes()) {
+        match self.namespace.del(key.as_bytes()) {
             Ok(()) => Frame::Integer(1), // Successfully deleted 1 key
             Err(e) => {
                 error!("Error deleting key {}: {}", key, e);
@@ -296,7 +296,7 @@ impl CommandHandler {
     /// Handle EXISTS command
     async fn handle_exists(&self, key: String) -> Frame {
         debug!("Handling EXISTS command for key: {}", key);
-        match self.tree.contains_key(key.as_bytes()) {
+        match self.namespace.exists(key.as_bytes()) {
             Ok(true) => Frame::Integer(1),  // Key exists
             Ok(false) => Frame::Integer(0), // Key does not exist
             Err(e) => {

@@ -5,6 +5,7 @@ use tracing::info;
 
 mod cmd;
 mod conn;
+mod namespace;
 mod resp;
 mod server;
 mod storage;
@@ -46,7 +47,7 @@ async fn main() -> Result<()> {
     }
 
     // Initialize storage
-    let storage = storage::MetaStorage::new(opt.data_dir.clone(), opt.inlined_metadata_size);
+    let storage = storage::Storage::new(opt.data_dir.clone(), opt.inlined_metadata_size);
 
     // Start server
     info!("Starting respd server on {}:{}", opt.host, opt.port);

@@ -27,6 +27,7 @@ clap = { workspace = true, features = ["derive"] }
 redis-protocol = { version = "6.0.0", features = ["bytes"] }
 atoi = "2.0.0"
 thiserror = "1.0.56"
+md-5 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

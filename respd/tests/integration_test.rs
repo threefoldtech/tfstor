@@ -44,7 +44,7 @@ impl TestServer {
                 println!("Listening on: {}", addr);
                 
                 // Create a shared storage instance
-                let storage = Arc::new(respd::storage::MetaStorage::new(thread_data_dir, None));
+                let storage = Arc::new(respd::storage::Storage::new(thread_data_dir, None));
                 
                 // Convert to tokio TcpListener
                 let listener = tokio::net::TcpListener::from_std(listener).expect("Failed to convert listener");
