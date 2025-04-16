@@ -33,6 +33,7 @@ pub enum Command {
     Exists { key: String },
     Check { key: String },
     Select { namespace: String },
+    NSNew { name: String },
     // Add more commands as needed
 }
 
@@ -96,6 +97,22 @@ impl Command {
                         };
 
                         Ok(Command::Select { namespace })
+                    }
+                    "NSNEW" => {
+                        if array.len() != 2 {
+                            return Err(CommandError::WrongNumberOfArguments("NSNEW".to_string()));
+                        }
+
+                        let name = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "NSNEW name must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(Command::NSNew { name })
                     }
                     "COMMAND" => {
                         // Return the Info variant
@@ -238,6 +255,7 @@ impl CommandHandler {
             Command::Del { key } => self.handle_del(key).await,
             Command::Exists { key } => self.handle_exists(key).await,
             Command::Check { key } => self.handle_check(key).await,
+            Command::NSNew { name } => self.handle_nsnew(name).await,
             // SELECT command is handled specially in the server.rs file
             // This is just a placeholder to satisfy the compiler
             Command::Select { namespace: _ } => Frame::SimpleString("OK".into()),
@@ -332,6 +350,18 @@ impl CommandHandler {
             Ok(Some(false)) | Ok(None) => Frame::Integer(0), // Check failed or key doesn't exist
             Err(e) => {
                 error!("Error checking integrity for key {}: {}", key, e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle NSNEW command - create a new namespace
+    async fn handle_nsnew(&self, name: String) -> Frame {
+        debug!("Handling NSNEW command for namespace: {}", name);
+        match self.storage.create_namespace(&name) {
+            Ok(_) => Frame::SimpleString("OK".into()),
+            Err(e) => {
+                error!("Error creating namespace {}: {}", name, e);
                 Frame::Error(format!("ERR {}", e))
             }
         }
