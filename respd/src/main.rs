@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use tracing::info;
 
 mod cmd;
+mod conn;
 mod resp;
 mod server;
 mod storage;
