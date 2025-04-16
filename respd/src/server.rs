@@ -44,7 +44,7 @@ pub async fn process(socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
     // Create a connection abstraction
     let mut conn = Conn::new(socket);
 
-    let default_tree = storage.get_tree(&conn.get_namespace()).await?;
+    let default_tree = storage.get_tree(&conn.get_namespace())?;
 
     // Create a command handler with the connection's namespace
     let mut handler = CommandHandler::new(Arc::clone(&storage), default_tree);
@@ -81,7 +81,7 @@ pub async fn process(socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
                             // Special handling for SELECT command to set the namespace
                             debug!("Handling SELECT command for namespace: {}", namespace);
                             conn.set_namespace(namespace.clone());
-                            let tree = storage.get_tree(&namespace).await?;
+                            let tree = storage.get_tree(&namespace)?;
                             // Update the handler's tree to use the new namespace
                             handler = CommandHandler::new(Arc::clone(&storage), tree);
                             Frame::SimpleString("OK".into())
