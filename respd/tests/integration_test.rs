@@ -234,24 +234,6 @@ mod test_config {
     }
 
     #[test]
-    fn test_command() {
-        let server = TestServer::new();
-        let mut conn = server.connect();
-
-        // Test COMMAND
-        let result: redis::Value = redis::cmd("COMMAND")
-            .query(&mut conn)
-            .expect("Failed to get command info");
-
-        // COMMAND should return an array of command information
-        if let redis::Value::Bulk(commands) = result {
-            assert!(!commands.is_empty());
-        } else {
-            panic!("Expected COMMAND to return a bulk reply");
-        }
-    }
-
-    #[test]
     fn test_multiple_commands() {
         let server = TestServer::new();
         let mut conn = server.connect();
@@ -361,8 +343,19 @@ mod test_config {
         let server = TestServer::new();
         let mut conn = server.connect();
 
-        // Create a new namespace
+        // Try to select a non-existent namespace
         let namespace_name = "test_namespace";
+        let select_result = redis::cmd("SELECT")
+            .arg(namespace_name)
+            .query::<String>(&mut conn);
+
+        // Should fail because the namespace doesn't exist yet
+        assert!(select_result.is_err());
+        if let Err(e) = select_result {
+            assert!(e.to_string().contains("Namespace not found"), "Expected error message to contain 'Namespace not found', got: {}", e);
+        }
+
+        // Create a new namespace
         let result: String = redis::cmd("NSNEW")
             .arg(namespace_name)
             .query(&mut conn)

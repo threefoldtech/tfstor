@@ -4,7 +4,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use md5::{Digest, Md5};
 
-use crate::storage::Storage;
+use crate::storage::{Storage, StorageError};
 use metastore::{BaseMetaTree, MetaError, Object, ObjectData};
 
 /// Represents a namespace with its associated tree
@@ -15,7 +15,7 @@ pub struct Namespace {
 
 impl Namespace {
     /// Create a new namespace with the given name and storage
-    pub fn new(storage: Arc<Storage>, name: String) -> Result<Self, MetaError> {
+    pub fn new(storage: Arc<Storage>, name: String) -> Result<Self, StorageError> {
         let tree = storage.get_namespace(name.as_str())?;
         Ok(Self { tree })
     }

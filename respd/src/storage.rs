@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -26,14 +28,21 @@ impl Storage {
     }
 
     /// Get a namespace instance for a specific namespace name
-    pub fn get_namespace(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    pub fn get_namespace(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, StorageError> {
+        if !self.store.bucket_exists(name)? {
+            return Err(StorageError::NamespaceNotFound);
+        }
+
         // TODO: get namespace meta
-        self.store.get_tree(name)
+
+        self.store
+            .get_tree(name)
+            .map_err(|e| StorageError::MetaError(e.to_string()))
     }
 
-    pub fn create_namespace(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+    pub fn create_namespace(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, StorageError> {
         if self.store.bucket_exists(name)? {
-            return Err(MetaError::KeyAlreadyExists);
+            return Err(StorageError::NamespaceNotFound);
         }
         let namespace_meta_raw = NamespaceMeta::new(name.to_string())
             .to_msgpack()
@@ -87,5 +96,31 @@ impl NamespaceMeta {
     pub fn from_msgpack(data: &[u8]) -> Result<Self> {
         rmp_serde::from_slice(data)
             .map_err(|e| anyhow::anyhow!("Failed to decode NamespaceMeta from MessagePack: {}", e))
+    }
+}
+
+#[derive(Debug)]
+pub enum StorageError {
+    NamespaceNotFound,
+    MetaError(String),
+}
+
+// Implement the std::error::Error trait
+impl Error for StorageError {}
+
+// Implement the Display trait for custom error messages
+impl fmt::Display for StorageError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            StorageError::NamespaceNotFound => write!(f, "Namespace not found"),
+            StorageError::MetaError(ref msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+// Implement conversion from MetaError to StorageError
+impl From<MetaError> for StorageError {
+    fn from(error: MetaError) -> Self {
+        StorageError::MetaError(error.to_string())
     }
 }

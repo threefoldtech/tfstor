@@ -46,7 +46,30 @@ pub async fn process(socket: TcpStream, storage: Arc<Storage>) -> Result<()> {
     // Create a connection abstraction
     let mut conn = Conn::new(socket);
 
-    let namespace = Namespace::new(storage.clone(), conn.get_namespace())?;
+    // Try to create a namespace for the default namespace
+    let namespace = match Namespace::new(storage.clone(), conn.get_namespace()) {
+        Ok(namespace) => namespace,
+        Err(e) => {
+            error!("failed to load default namespace: {}", e);
+            // If we can't create the default namespace, try to create it
+            debug!("Default namespace not found, attempting to create it");
+            match storage.create_namespace(&conn.get_namespace()) {
+                Ok(tree) => {
+                    // Create a namespace with the newly created tree
+                    Namespace { tree }
+                }
+                Err(create_err) => {
+                    // If we can't create the namespace, return an error
+                    error!("Failed to create default namespace: {}", create_err);
+                    return Err(anyhow::anyhow!(
+                        "Failed to initialize default namespace: {}",
+                        create_err
+                    ));
+                }
+            }
+        }
+    };
+
     // Create a command handler with the connection's namespace
     let mut handler = CommandHandler::new(storage.clone(), namespace);
 
@@ -82,10 +105,24 @@ pub async fn process(socket: TcpStream, storage: Arc<Storage>) -> Result<()> {
                             // Special handling for SELECT command to set the namespace
                             debug!("Handling SELECT command for namespace: {}", namespace);
                             conn.set_namespace(namespace.clone());
-                            let namespace = Namespace::new(storage.clone(), conn.get_namespace())?;
-                            // Update the handler's tree to use the new namespace
-                            handler = CommandHandler::new(storage.clone(), namespace);
-                            Frame::SimpleString("OK".into())
+
+                            // Try to create a new namespace instance
+                            match Namespace::new(storage.clone(), conn.get_namespace()) {
+                                Ok(namespace) => {
+                                    // Update the handler's tree to use the new namespace
+                                    handler = CommandHandler::new(storage.clone(), namespace);
+                                    Frame::SimpleString("OK".into())
+                                }
+                                Err(e) => {
+                                    // Forward the error message to the client
+                                    error!(
+                                        "Error selecting namespace {}: {}",
+                                        conn.get_namespace(),
+                                        e
+                                    );
+                                    Frame::Error(format!("ERR {}", e))
+                                }
+                            }
                         }
                         Ok(cmd) => handler.execute(cmd).await,
                         Err(e) => {
