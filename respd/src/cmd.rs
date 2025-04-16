@@ -1,5 +1,6 @@
 use crate::storage::MetaStorage;
 use bytes::Bytes;
+use metastore::BaseMetaTree;
 use redis_protocol::resp2::types::OwnedFrame as Frame;
 use std::sync::Arc;
 use thiserror::Error;
@@ -173,13 +174,17 @@ impl Command {
 
 /// Handler for Redis commands
 pub struct CommandHandler {
+    #[allow(dead_code)]
     storage: Arc<MetaStorage>,
+
+    /// The tree for the current namespace
+    tree: Box<dyn BaseMetaTree>,
 }
 
 impl CommandHandler {
     /// Create a new command handler
-    pub fn new(storage: Arc<MetaStorage>) -> Self {
-        Self { storage }
+    pub fn new(storage: Arc<MetaStorage>, tree: Box<dyn BaseMetaTree>) -> Self {
+        Self { storage, tree }
     }
 
     /// Execute a command and return the response frame
@@ -200,7 +205,7 @@ impl CommandHandler {
     /// Handle GET command
     async fn handle_get(&self, key: String) -> Frame {
         debug!("Handling GET command for key: {}", key);
-        match self.storage.get(&key).await {
+        match self.tree.get(key.as_bytes()) {
             Ok(Some(value)) => Frame::BulkString(value.to_vec()),
             Ok(None) => Frame::Null,
             Err(e) => {
@@ -213,7 +218,7 @@ impl CommandHandler {
     /// Handle SET command
     async fn handle_set(&self, key: String, value: Bytes) -> Frame {
         debug!("Handling SET command for key: {}", key);
-        match self.storage.set(&key, value.to_vec()).await {
+        match self.tree.insert(key.as_bytes(), value.to_vec()) {
             Ok(()) => Frame::SimpleString("OK".into()),
             Err(e) => {
                 error!("Error setting key {}: {}", key, e);
@@ -233,7 +238,7 @@ impl CommandHandler {
     /// Handle DEL command
     async fn handle_del(&self, key: String) -> Frame {
         debug!("Handling DEL command for key: {}", key);
-        match self.storage.delete(&key).await {
+        match self.tree.remove(key.as_bytes()) {
             Ok(()) => Frame::Integer(1), // Successfully deleted 1 key
             Err(e) => {
                 error!("Error deleting key {}: {}", key, e);
@@ -245,14 +250,9 @@ impl CommandHandler {
     /// Handle EXISTS command
     async fn handle_exists(&self, key: String) -> Frame {
         debug!("Handling EXISTS command for key: {}", key);
-        match self.storage.exists(&key).await {
-            Ok(exists) => {
-                if exists {
-                    Frame::Integer(1) // Key exists
-                } else {
-                    Frame::Integer(0) // Key does not exist
-                }
-            }
+        match self.tree.get(key.as_bytes()) {
+            Ok(Some(_)) => Frame::Integer(1), // Key exists
+            Ok(None) => Frame::Integer(0),    // Key does not exist
             Err(e) => {
                 error!("Error checking if key {} exists: {}", key, e);
                 Frame::Error(format!("ERR {}", e))

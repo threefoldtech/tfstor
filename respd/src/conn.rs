@@ -24,6 +24,11 @@ impl Conn {
         self.namespace = namespace;
     }
 
+    /// Get the current namespace
+    pub fn get_namespace(&self) -> String {
+        self.namespace.clone()
+    }
+
     /// Read data from the socket into the provided buffer
     pub async fn read_buf(&mut self, buf: &mut BytesMut) -> std::io::Result<usize> {
         self.socket.read_buf(buf).await
