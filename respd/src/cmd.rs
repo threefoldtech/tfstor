@@ -250,9 +250,9 @@ impl CommandHandler {
     /// Handle EXISTS command
     async fn handle_exists(&self, key: String) -> Frame {
         debug!("Handling EXISTS command for key: {}", key);
-        match self.tree.get(key.as_bytes()) {
-            Ok(Some(_)) => Frame::Integer(1), // Key exists
-            Ok(None) => Frame::Integer(0),    // Key does not exist
+        match self.tree.contains_key(key.as_bytes()) {
+            Ok(true) => Frame::Integer(1),  // Key exists
+            Ok(false) => Frame::Integer(0), // Key does not exist
             Err(e) => {
                 error!("Error checking if key {} exists: {}", key, e);
                 Frame::Error(format!("ERR {}", e))
