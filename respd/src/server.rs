@@ -41,11 +41,13 @@ pub async fn run(addr: String, storage: MetaStorage) -> Result<()> {
 }
 
 pub async fn process(socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()> {
-    // Create a command handler
-    let handler = CommandHandler::new(storage);
-
     // Create a connection abstraction
     let mut conn = Conn::new(socket);
+
+    let default_tree = storage.get_tree(&conn.get_namespace()).await?;
+
+    // Create a command handler with the connection's namespace
+    let mut handler = CommandHandler::new(Arc::clone(&storage), default_tree);
 
     // Use BytesMut for zero-copy operations
     let mut buffer = BytesMut::with_capacity(4096);
@@ -78,7 +80,10 @@ pub async fn process(socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
                         Ok(Command::Select { namespace }) => {
                             // Special handling for SELECT command to set the namespace
                             debug!("Handling SELECT command for namespace: {}", namespace);
-                            conn.set_namespace(namespace);
+                            conn.set_namespace(namespace.clone());
+                            let tree = storage.get_tree(&namespace).await?;
+                            // Update the handler's tree to use the new namespace
+                            handler = CommandHandler::new(Arc::clone(&storage), tree);
                             Frame::SimpleString("OK".into())
                         }
                         Ok(cmd) => handler.execute(cmd).await,
