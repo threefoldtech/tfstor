@@ -16,7 +16,7 @@ pub struct Namespace {
 impl Namespace {
     /// Create a new namespace with the given name and storage
     pub fn new(storage: Arc<Storage>, name: String) -> Result<Self, MetaError> {
-        let tree = storage.get_tree(name.as_str())?;
+        let tree = storage.get_namespace(name.as_str())?;
         Ok(Self { tree })
     }
 

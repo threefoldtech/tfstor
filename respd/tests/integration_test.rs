@@ -355,4 +355,45 @@ mod test_config {
         // Should return 0 for a non-existent key
         assert_eq!(nonexistent_check, 0);
     }
+
+    #[test]
+    fn test_namespace_creation() {
+        let server = TestServer::new();
+        let mut conn = server.connect();
+
+        // Create a new namespace
+        let namespace_name = "test_namespace";
+        let result: String = redis::cmd("NSNEW")
+            .arg(namespace_name)
+            .query(&mut conn)
+            .expect("Failed to create namespace");
+
+        // Should return OK for successful namespace creation
+        assert_eq!(result, "OK");
+
+        // Select the newly created namespace
+        let select_result: String = redis::cmd("SELECT")
+            .arg(namespace_name)
+            .query(&mut conn)
+            .expect("Failed to select namespace");
+
+        // Should return OK for successful namespace selection
+        assert_eq!(select_result, "OK");
+
+        // Test operations in the new namespace
+        let test_key = "ns_test_key";
+        let test_value = "ns_test_value";
+        let _: () = redis::cmd("SET")
+            .arg(test_key)
+            .arg(test_value)
+            .query(&mut conn)
+            .expect("Failed to set key in new namespace");
+
+        let value: String = redis::cmd("GET")
+            .arg(test_key)
+            .query(&mut conn)
+            .expect("Failed to get key from new namespace");
+
+        assert_eq!(value, test_value);
+    }
 }
