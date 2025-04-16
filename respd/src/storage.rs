@@ -1,15 +1,13 @@
 use anyhow::Result;
 use metastore::{BaseMetaTree, Durability, FjallStore, MetaError, MetaStore};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 // Default tree name for key-value storage
 // No longer using a default tree name as we'll use the namespace as the tree name
 
 /// Storage implementation using metastore with inlined data
 pub struct MetaStorage {
-    store: Arc<Mutex<MetaStore>>,
+    store: MetaStore,
 }
 
 impl MetaStorage {
@@ -21,16 +19,11 @@ impl MetaStorage {
 
         let store = MetaStore::new(fjall_store, inlined_metadata_size);
 
-        // The tree will be created automatically when we try to access it
-
-        Self {
-            store: Arc::new(Mutex::new(store)),
-        }
+        Self { store }
     }
 
     /// Get a tree for a specific namespace
-    pub async fn get_tree(&self, namespace: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
-        let store = self.store.lock().await;
-        store.get_tree(namespace)
+    pub fn get_tree(&self, namespace: &str) -> Result<Box<dyn BaseMetaTree>, MetaError> {
+        self.store.get_tree(namespace)
     }
 }
