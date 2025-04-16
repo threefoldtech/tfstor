@@ -278,4 +278,48 @@ mod test_config {
             assert_eq!(value, expected);
         }
     }
+
+    #[test]
+    fn test_mget() {
+        let server = TestServer::new();
+        let mut conn = server.connect();
+
+        // Set multiple keys
+        let keys = vec!["mkey1", "mkey2", "mkey3"];
+        let values = vec!["mvalue1", "mvalue2", "mvalue3"];
+        
+        for i in 0..keys.len() {
+            let _: () = redis::cmd("SET")
+                .arg(keys[i])
+                .arg(values[i])
+                .query(&mut conn)
+                .expect("Failed to set key");
+        }
+
+        // Test MGET with all existing keys
+        let result: Vec<String> = redis::cmd("MGET")
+            .arg(keys[0])
+            .arg(keys[1])
+            .arg(keys[2])
+            .query(&mut conn)
+            .expect("Failed to execute MGET");
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], values[0]);
+        assert_eq!(result[1], values[1]);
+        assert_eq!(result[2], values[2]);
+
+        // Test MGET with some non-existent keys
+        let mixed_result: Vec<Option<String>> = redis::cmd("MGET")
+            .arg(keys[0])
+            .arg("nonexistent_key")
+            .arg(keys[2])
+            .query(&mut conn)
+            .expect("Failed to execute MGET with nonexistent key");
+
+        assert_eq!(mixed_result.len(), 3);
+        assert_eq!(mixed_result[0], Some(values[0].to_string()));
+        assert_eq!(mixed_result[1], None);
+        assert_eq!(mixed_result[2], Some(values[2].to_string()));
+    }
 }

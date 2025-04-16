@@ -25,6 +25,7 @@ pub enum CommandError {
 #[derive(Debug)]
 pub enum Command {
     Get { key: String },
+    MGet { keys: Vec<String> },
     Set { key: String, value: Bytes },
     Ping { message: Option<String> },
     Info,
@@ -57,6 +58,28 @@ impl Command {
 
                 // Parse the command based on its name
                 match command_name.as_str() {
+                    "MGET" => {
+                        if array.len() < 2 {
+                            return Err(CommandError::WrongNumberOfArguments("MGET".to_string()));
+                        }
+
+                        let mut keys = Vec::with_capacity(array.len() - 1);
+                        for item in array.iter().skip(1) {
+                            let key = match item {
+                                Frame::BulkString(bytes) => {
+                                    String::from_utf8_lossy(bytes).to_string()
+                                }
+                                _ => {
+                                    return Err(CommandError::Protocol(
+                                        "MGET key must be a bulk string".to_string(),
+                                    ))
+                                }
+                            };
+                            keys.push(key);
+                        }
+
+                        Ok(Command::MGet { keys })
+                    }
                     "SELECT" => {
                         if array.len() != 2 {
                             return Err(CommandError::WrongNumberOfArguments("SELECT".to_string()));
@@ -191,6 +214,7 @@ impl CommandHandler {
     pub async fn execute(&self, cmd: Command) -> Frame {
         match cmd {
             Command::Get { key } => self.handle_get(key).await,
+            Command::MGet { keys } => self.handle_mget(keys).await,
             Command::Set { key, value } => self.handle_set(key, value).await,
             Command::Ping { message } => self.handle_ping(message),
             Command::Info => self.handle_command(),
@@ -213,6 +237,28 @@ impl CommandHandler {
                 Frame::Error(format!("ERR {}", e))
             }
         }
+    }
+
+    /// Handle MGET command - get multiple keys at once
+    async fn handle_mget(&self, keys: Vec<String>) -> Frame {
+        debug!("Handling MGET command for keys: {:?}", keys);
+
+        let mut values = Vec::with_capacity(keys.len());
+
+        for key in keys {
+            match self.tree.get(key.as_bytes()) {
+                Ok(Some(value)) => values.push(Frame::BulkString(value.to_vec())),
+                Ok(None) => values.push(Frame::Null),
+                Err(e) => {
+                    error!("Error getting key {}: {}", key, e);
+                    // For MGET, we don't return an error for the whole command
+                    // Instead, we return a null for this specific key
+                    values.push(Frame::Null);
+                }
+            }
+        }
+
+        Frame::Array(values)
     }
 
     /// Handle SET command
