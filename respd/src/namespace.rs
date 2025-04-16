@@ -29,25 +29,29 @@ impl Namespace {
         Ok(())
     }
 
-    pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>, MetaError> {
-        let obj_meta = match self.tree.get(key)? {
+    /// Get an Object from the tree for a given key
+    fn get_object(&self, key: &[u8]) -> Result<Option<Object>, MetaError> {
+        match self.tree.get(key)? {
             Some(data) => {
                 let obj = Object::try_from(&*data).expect("Malformed object");
                 Ok(Some(obj))
             }
             None => Ok(None),
-        };
+        }
+    }
+
+    pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>, MetaError> {
+        let obj_meta = self.get_object(key)?;
         match obj_meta {
-            Ok(Some(obj)) => {
+            Some(obj) => {
                 if let Some(data) = obj.inlined() {
                     let bytes = bytes::Bytes::from(data.clone());
                     Ok(Some(bytes))
                 } else {
-                    Err(MetaError::KeyNotFound)
+                    Err(MetaError::OtherDBError("Object is not inline".to_string()))
                 }
             }
-            Ok(None) => Ok(None),
-            Err(e) => Err(e),
+            None => Ok(None),
         }
     }
 
@@ -58,5 +62,25 @@ impl Namespace {
 
     pub fn exists(&self, key: &[u8]) -> Result<bool, MetaError> {
         self.tree.contains_key(key)
+    }
+
+    pub fn check(&self, key: &[u8]) -> Result<Option<bool>, MetaError> {
+        let obj = self.get_object(key)?;
+        match obj {
+            Some(obj) => {
+                if let Some(data) = obj.inlined() {
+                    // check the hash
+                    let hash: [u8; 16] = Md5::digest(data).into();
+                    if hash != *obj.hash() {
+                        Ok(Some(false))
+                    } else {
+                        Ok(Some(true))
+                    }
+                } else {
+                    Err(MetaError::OtherDBError("Object is not inline".to_string()))
+                }
+            }
+            None => Ok(None),
+        }
     }
 }
