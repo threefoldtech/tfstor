@@ -2736,6 +2736,7 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
+ "md-5 0.10.6",
  "metastore",
  "rand",
  "redis",

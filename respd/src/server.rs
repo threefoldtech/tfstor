@@ -1,7 +1,3 @@
-use crate::cmd::{Command, CommandHandler};
-use crate::conn::Conn;
-use crate::resp::RespHelper;
-use crate::storage::MetaStorage;
 use anyhow::Result;
 use bytes::BytesMut;
 use redis_protocol::resp2::types::OwnedFrame as Frame;
@@ -9,7 +5,13 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, error, info};
 
-pub async fn run(addr: String, storage: MetaStorage) -> Result<()> {
+use crate::cmd::{Command, CommandHandler};
+use crate::conn::Conn;
+use crate::namespace::Namespace;
+use crate::resp::RespHelper;
+use crate::storage::Storage;
+
+pub async fn run(addr: String, storage: Storage) -> Result<()> {
     // Create a TCP listener
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on: {}", addr);
@@ -40,14 +42,13 @@ pub async fn run(addr: String, storage: MetaStorage) -> Result<()> {
     }
 }
 
-pub async fn process(socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()> {
+pub async fn process(socket: TcpStream, storage: Arc<Storage>) -> Result<()> {
     // Create a connection abstraction
     let mut conn = Conn::new(socket);
 
-    let default_tree = storage.get_tree(&conn.get_namespace())?;
-
+    let namespace = Namespace::new(storage.clone(), conn.get_namespace())?;
     // Create a command handler with the connection's namespace
-    let mut handler = CommandHandler::new(Arc::clone(&storage), default_tree);
+    let mut handler = CommandHandler::new(storage.clone(), namespace);
 
     // Use BytesMut for zero-copy operations
     let mut buffer = BytesMut::with_capacity(4096);
@@ -81,9 +82,9 @@ pub async fn process(socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()>
                             // Special handling for SELECT command to set the namespace
                             debug!("Handling SELECT command for namespace: {}", namespace);
                             conn.set_namespace(namespace.clone());
-                            let tree = storage.get_tree(&namespace)?;
+                            let namespace = Namespace::new(storage.clone(), conn.get_namespace())?;
                             // Update the handler's tree to use the new namespace
-                            handler = CommandHandler::new(Arc::clone(&storage), tree);
+                            handler = CommandHandler::new(storage.clone(), namespace);
                             Frame::SimpleString("OK".into())
                         }
                         Ok(cmd) => handler.execute(cmd).await,
