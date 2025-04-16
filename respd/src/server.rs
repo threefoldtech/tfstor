@@ -1,11 +1,11 @@
 use crate::cmd::{Command, CommandHandler};
+use crate::conn::Conn;
 use crate::resp::RespHelper;
 use crate::storage::MetaStorage;
 use anyhow::Result;
 use bytes::BytesMut;
 use redis_protocol::resp2::types::OwnedFrame as Frame;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, error, info};
 
@@ -40,9 +40,12 @@ pub async fn run(addr: String, storage: MetaStorage) -> Result<()> {
     }
 }
 
-pub async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()> {
+pub async fn process(socket: TcpStream, storage: Arc<MetaStorage>) -> Result<()> {
     // Create a command handler
     let handler = CommandHandler::new(storage);
+
+    // Create a connection abstraction
+    let mut conn = Conn::new(socket);
 
     // Use BytesMut for zero-copy operations
     let mut buffer = BytesMut::with_capacity(4096);
@@ -51,7 +54,7 @@ pub async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result
     loop {
         // Read data directly into BytesMut buffer
         // This avoids an extra copy compared to using Vec<u8>
-        let _n = match socket.read_buf(&mut buffer).await {
+        let _n = match conn.read_buf(&mut buffer).await {
             Ok(0) => break, // Connection closed
             Ok(n) => n,
             Err(e) => {
@@ -72,6 +75,12 @@ pub async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result
 
                     // Process the frame
                     let response = match Command::from_frame(frame) {
+                        Ok(Command::Select { namespace }) => {
+                            // Special handling for SELECT command to set the namespace
+                            debug!("Handling SELECT command for namespace: {}", namespace);
+                            conn.set_namespace(namespace);
+                            Frame::SimpleString("OK".into())
+                        }
                         Ok(cmd) => handler.execute(cmd).await,
                         Err(e) => {
                             error!("Error parsing command: {}", e);
@@ -82,7 +91,7 @@ pub async fn process(mut socket: TcpStream, storage: Arc<MetaStorage>) -> Result
                     // Encode and send the response
                     match RespHelper::encode_frame(&response) {
                         Ok(bytes) => {
-                            if let Err(e) = socket.write_all(&bytes).await {
+                            if let Err(e) = conn.write_all(&bytes).await {
                                 error!("Error writing response: {}", e);
                                 break;
                             }

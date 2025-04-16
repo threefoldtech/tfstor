@@ -29,6 +29,7 @@ pub enum Command {
     Info,
     Del { key: String },
     Exists { key: String },
+    Select { namespace: String },
     // Add more commands as needed
 }
 
@@ -55,6 +56,22 @@ impl Command {
 
                 // Parse the command based on its name
                 match command_name.as_str() {
+                    "SELECT" => {
+                        if array.len() != 2 {
+                            return Err(CommandError::WrongNumberOfArguments("SELECT".to_string()));
+                        }
+
+                        let namespace = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "SELECT namespace must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(Command::Select { namespace })
+                    }
                     "COMMAND" => {
                         // Return the Info variant
                         Ok(Command::Info)
@@ -174,6 +191,9 @@ impl CommandHandler {
             Command::Info => self.handle_command(),
             Command::Del { key } => self.handle_del(key).await,
             Command::Exists { key } => self.handle_exists(key).await,
+            // SELECT command is handled specially in the server.rs file
+            // This is just a placeholder to satisfy the compiler
+            Command::Select { namespace: _ } => Frame::SimpleString("OK".into()),
         }
     }
 
@@ -207,6 +227,36 @@ impl CommandHandler {
         match message {
             Some(msg) => Frame::BulkString(msg.into_bytes()),
             None => Frame::SimpleString("PONG".into()),
+        }
+    }
+
+    /// Handle DEL command
+    async fn handle_del(&self, key: String) -> Frame {
+        debug!("Handling DEL command for key: {}", key);
+        match self.storage.delete(&key).await {
+            Ok(()) => Frame::Integer(1), // Successfully deleted 1 key
+            Err(e) => {
+                error!("Error deleting key {}: {}", key, e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle EXISTS command
+    async fn handle_exists(&self, key: String) -> Frame {
+        debug!("Handling EXISTS command for key: {}", key);
+        match self.storage.exists(&key).await {
+            Ok(exists) => {
+                if exists {
+                    Frame::Integer(1) // Key exists
+                } else {
+                    Frame::Integer(0) // Key does not exist
+                }
+            }
+            Err(e) => {
+                error!("Error checking if key {} exists: {}", key, e);
+                Frame::Error(format!("ERR {}", e))
+            }
         }
     }
 
@@ -299,35 +349,5 @@ impl CommandHandler {
         ];
 
         Frame::Array(command_info)
-    }
-
-    /// Handle DEL command
-    async fn handle_del(&self, key: String) -> Frame {
-        debug!("Handling DEL command for key: {}", key);
-        match self.storage.delete(&key).await {
-            Ok(()) => Frame::Integer(1), // Successfully deleted 1 key
-            Err(e) => {
-                error!("Error deleting key {}: {}", key, e);
-                Frame::Error(format!("ERR {}", e))
-            }
-        }
-    }
-
-    /// Handle EXISTS command
-    async fn handle_exists(&self, key: String) -> Frame {
-        debug!("Handling EXISTS command for key: {}", key);
-        match self.storage.exists(&key).await {
-            Ok(exists) => {
-                if exists {
-                    Frame::Integer(1) // Key exists
-                } else {
-                    Frame::Integer(0) // Key does not exist
-                }
-            }
-            Err(e) => {
-                error!("Error checking if key {} exists: {}", key, e);
-                Frame::Error(format!("ERR {}", e))
-            }
-        }
     }
 }
