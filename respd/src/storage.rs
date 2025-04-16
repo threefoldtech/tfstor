@@ -40,6 +40,21 @@ impl Storage {
             .map_err(|e| StorageError::MetaError(e.to_string()))
     }
 
+    pub fn get_namespace_meta(&self, name: &str) -> Result<NamespaceMeta, StorageError> {
+        if !self.store.bucket_exists(name)? {
+            return Err(StorageError::NamespaceNotFound);
+        }
+        let tree = self.store.get_allbuckets_tree()?;
+        let raw = tree
+            .get(name.as_bytes())
+            .map_err(|e| StorageError::MetaError(e.to_string()))?;
+        if let Some(raw) = raw {
+            NamespaceMeta::from_msgpack(&raw).map_err(|e| StorageError::MetaError(e.to_string()))
+        } else {
+            Err(StorageError::NamespaceNotFound)
+        }
+    }
+
     pub fn create_namespace(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, StorageError> {
         if self.store.bucket_exists(name)? {
             return Err(StorageError::NamespaceNotFound);
@@ -53,18 +68,18 @@ impl Storage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct NamespaceMeta {
-    name: String,
-    password: Option<String>,
-    max_size: Option<u64>,
-    private: bool,
-    read_only: bool,
-    freeze: bool,
-    key_mode: KeyMode,
+pub struct NamespaceMeta {
+    pub name: String,
+    pub password: Option<String>,
+    pub max_size: Option<u64>,
+    pub private: bool,
+    pub worm: bool,
+    pub locked: bool,
+    pub key_mode: KeyMode,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum KeyMode {
+pub enum KeyMode {
     UserKey,
     Sequential,
 }
@@ -79,8 +94,8 @@ impl NamespaceMeta {
             password: None,
             max_size: None,
             private: false,
-            read_only: false,
-            freeze: false,
+            worm: false,
+            locked: false,
             key_mode: KeyMode::UserKey,
         }
     }

@@ -33,6 +33,7 @@ pub enum Command {
     Check { key: String },
     Select { namespace: String },
     NSNew { name: String },
+    NSInfo { name: String },
     // Add more commands as needed
 }
 
@@ -112,6 +113,22 @@ impl Command {
                         };
 
                         Ok(Command::NSNew { name })
+                    }
+                    "NSINFO" => {
+                        if array.len() != 2 {
+                            return Err(CommandError::WrongNumberOfArguments("NSINFO".to_string()));
+                        }
+
+                        let name = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "NSINFO name must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(Command::NSInfo { name })
                     }
                     "DEL" => {
                         if array.len() != 2 {
@@ -250,6 +267,7 @@ impl CommandHandler {
             Command::Exists { key } => self.handle_exists(key).await,
             Command::Check { key } => self.handle_check(key).await,
             Command::NSNew { name } => self.handle_nsnew(name).await,
+            Command::NSInfo { name } => self.handle_nsinfo(name).await,
             // SELECT command is handled specially in the server.rs file
             // This is just a placeholder to satisfy the compiler
             Command::Select { namespace: _ } => Frame::SimpleString("OK".into()),
@@ -356,6 +374,35 @@ impl CommandHandler {
             Ok(_) => Frame::SimpleString("OK".into()),
             Err(e) => {
                 error!("Error creating namespace {}: {}", name, e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle NSINFO command - display information about a namespace
+    async fn handle_nsinfo(&self, name: String) -> Frame {
+        debug!("Handling NSINFO command for namespace: {}", name);
+        match self.storage.get_namespace_meta(&name) {
+            Ok(meta) => {
+                // Format the namespace information as a multi-line string
+                let info = format!(
+                    "# namespace\nname: {}\npublic: {}\npassword: {}\ndata_limits_bytes: {}\nmode: {}\nworm: {}\nlocked: {}",
+                    meta.name,
+                    if meta.private { "no" } else { "yes" },
+                    if meta.password.is_some() { "yes" } else { "no" },
+                    meta.max_size.unwrap_or(0),
+                    match meta.key_mode {
+                        crate::storage::KeyMode::UserKey => "userkey",
+                        crate::storage::KeyMode::Sequential => "sequential",
+                    },
+                    if meta.worm { "yes" } else { "no" },
+                    if meta.locked { "yes" } else { "no" }
+                );
+
+                Frame::BulkString(info.into())
+            }
+            Err(e) => {
+                error!("Error getting namespace info for {}: {}", name, e);
                 Frame::Error(format!("ERR {}", e))
             }
         }

@@ -373,6 +373,23 @@ mod test_config {
         // Should return OK for successful namespace selection
         assert_eq!(select_result, "OK");
 
+        // Get namespace info
+        let info: String = redis::cmd("NSINFO")
+            .arg(namespace_name)
+            .query(&mut conn)
+            .expect("Failed to get namespace info");
+
+        // Verify the namespace info contains the expected fields
+        assert!(info.contains("name: test_namespace"));
+        assert!(info.contains("public: yes"));
+        assert!(info.contains("password: no"));
+        assert!(info.contains("data_limits_bytes: 0"));
+        assert!(info.contains("mode: userkey"));
+        assert!(info.contains("worm: no"));
+        assert!(info.contains("locked: no"));
+        // Verify the '## new fields' line is not present
+        assert!(!info.contains("## new fields"));
+
         // Test operations in the new namespace
         let test_key = "ns_test_key";
         let test_value = "ns_test_value";
