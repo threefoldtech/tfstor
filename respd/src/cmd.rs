@@ -28,7 +28,6 @@ pub enum Command {
     MGet { keys: Vec<String> },
     Set { key: String, value: Bytes },
     Ping { message: Option<String> },
-    Info,
     Del { key: String },
     Exists { key: String },
     Check { key: String },
@@ -113,10 +112,6 @@ impl Command {
                         };
 
                         Ok(Command::NSNew { name })
-                    }
-                    "COMMAND" => {
-                        // Return the Info variant
-                        Ok(Command::Info)
                     }
                     "DEL" => {
                         if array.len() != 2 {
@@ -251,7 +246,6 @@ impl CommandHandler {
             Command::MGet { keys } => self.handle_mget(keys).await,
             Command::Set { key, value } => self.handle_set(key, value).await,
             Command::Ping { message } => self.handle_ping(message),
-            Command::Info => self.handle_command(),
             Command::Del { key } => self.handle_del(key).await,
             Command::Exists { key } => self.handle_exists(key).await,
             Command::Check { key } => self.handle_check(key).await,
@@ -365,96 +359,5 @@ impl CommandHandler {
                 Frame::Error(format!("ERR {}", e))
             }
         }
-    }
-
-    /// Handle COMMAND command
-    /// Returns information about the supported commands in a format compatible with redis-cli
-    fn handle_command(&self) -> Frame {
-        // For redis-cli compatibility, we need to return a specific format
-        // Based on the Redis protocol specification, the COMMAND response should be:
-        // 1. An array where each element is information about a command
-        // 2. Each command info is an array with specific elements
-
-        // Format: [name, arity, flags, first_key, last_key, step]
-        let command_info = vec![
-            // GET command
-            Frame::Array(vec![
-                Frame::BulkString("get".into()), // name
-                Frame::Integer(2),               // arity (command + 1 arg)
-                Frame::Array(vec![
-                    // flags
-                    Frame::BulkString("readonly".into()),
-                    Frame::BulkString("fast".into()),
-                ]),
-                Frame::Integer(1), // first key position
-                Frame::Integer(1), // last key position
-                Frame::Integer(1), // step
-            ]),
-            // SET command
-            Frame::Array(vec![
-                Frame::BulkString("set".into()), // name
-                Frame::Integer(3),               // arity (command + 2 args)
-                Frame::Array(vec![
-                    // flags
-                    Frame::BulkString("write".into()),
-                    Frame::BulkString("denyoom".into()),
-                ]),
-                Frame::Integer(1), // first key position
-                Frame::Integer(1), // last key position
-                Frame::Integer(1), // step
-            ]),
-            // DEL command
-            Frame::Array(vec![
-                Frame::BulkString("del".into()), // name
-                Frame::Integer(2),               // arity (command + 1 arg)
-                Frame::Array(vec![
-                    // flags
-                    Frame::BulkString("write".into()),
-                ]),
-                Frame::Integer(1), // first key position
-                Frame::Integer(1), // last key position
-                Frame::Integer(1), // step
-            ]),
-            // EXISTS command
-            Frame::Array(vec![
-                Frame::BulkString("exists".into()), // name
-                Frame::Integer(2),                  // arity (command + 1 arg)
-                Frame::Array(vec![
-                    // flags
-                    Frame::BulkString("readonly".into()),
-                    Frame::BulkString("fast".into()),
-                ]),
-                Frame::Integer(1), // first key position
-                Frame::Integer(1), // last key position
-                Frame::Integer(1), // step
-            ]),
-            // PING command
-            Frame::Array(vec![
-                Frame::BulkString("ping".into()), // name
-                Frame::Integer(-1),               // arity (variable args)
-                Frame::Array(vec![
-                    // flags
-                    Frame::BulkString("fast".into()),
-                ]),
-                Frame::Integer(0), // first key position
-                Frame::Integer(0), // last key position
-                Frame::Integer(0), // step
-            ]),
-            // COMMAND command
-            Frame::Array(vec![
-                Frame::BulkString("command".into()), // name
-                Frame::Integer(0),                   // arity (just the command)
-                Frame::Array(vec![
-                    // flags
-                    Frame::BulkString("readonly".into()),
-                    Frame::BulkString("random".into()),
-                ]),
-                Frame::Integer(0), // first key position
-                Frame::Integer(0), // last key position
-                Frame::Integer(0), // step
-            ]),
-        ];
-
-        Frame::Array(command_info)
     }
 }
