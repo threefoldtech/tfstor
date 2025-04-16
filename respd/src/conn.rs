@@ -6,8 +6,8 @@ use tokio::net::TcpStream;
 pub struct Conn {
     /// The TCP socket for the connection
     socket: TcpStream,
-    /// Optional namespace for the connection
-    namespace: Option<String>,
+    /// Namespace for the connection
+    namespace: String,
 }
 
 impl Conn {
@@ -15,19 +15,14 @@ impl Conn {
     pub fn new(socket: TcpStream) -> Self {
         Self {
             socket,
-            namespace: None,
+            namespace: "default".to_string(),
         }
     }
 
     /// Set the namespace for this connection
     pub fn set_namespace(&mut self, namespace: String) {
-        self.namespace = Some(namespace);
+        self.namespace = namespace;
     }
-
-    // Get the current namespace
-    //pub fn namespace(&self) -> Option<&str> {
-    //    self.namespace.as_deref()
-    //}
 
     /// Read data from the socket into the provided buffer
     pub async fn read_buf(&mut self, buf: &mut BytesMut) -> std::io::Result<usize> {
