@@ -322,4 +322,37 @@ mod test_config {
         assert_eq!(mixed_result[1], None);
         assert_eq!(mixed_result[2], Some(values[2].to_string()));
     }
+
+    #[test]
+    fn test_check() {
+        let server = TestServer::new();
+        let mut conn = server.connect();
+
+        // Set a key
+        let key = "check_key";
+        let value = "check_value";
+        let _: () = redis::cmd("SET")
+            .arg(key)
+            .arg(value)
+            .query(&mut conn)
+            .expect("Failed to set key");
+
+        // Test CHECK with existing key
+        let check_result: i32 = redis::cmd("CHECK")
+            .arg(key)
+            .query(&mut conn)
+            .expect("Failed to execute CHECK");
+
+        // Should return 1 for a valid key (integrity check passed)
+        assert_eq!(check_result, 1);
+
+        // Test CHECK with non-existent key
+        let nonexistent_check: i32 = redis::cmd("CHECK")
+            .arg("nonexistent_key")
+            .query(&mut conn)
+            .expect("Failed to execute CHECK with nonexistent key");
+
+        // Should return 0 for a non-existent key
+        assert_eq!(nonexistent_check, 0);
+    }
 }

@@ -31,6 +31,7 @@ pub enum Command {
     Info,
     Del { key: String },
     Exists { key: String },
+    Check { key: String },
     Select { namespace: String },
     // Add more commands as needed
 }
@@ -132,6 +133,22 @@ impl Command {
 
                         Ok(Command::Exists { key })
                     }
+                    "CHECK" => {
+                        if array.len() != 2 {
+                            return Err(CommandError::WrongNumberOfArguments("CHECK".to_string()));
+                        }
+
+                        let key = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "CHECK key must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(Command::Check { key })
+                    }
                     "GET" => {
                         if array.len() != 2 {
                             return Err(CommandError::WrongNumberOfArguments("GET".to_string()));
@@ -220,6 +237,7 @@ impl CommandHandler {
             Command::Info => self.handle_command(),
             Command::Del { key } => self.handle_del(key).await,
             Command::Exists { key } => self.handle_exists(key).await,
+            Command::Check { key } => self.handle_check(key).await,
             // SELECT command is handled specially in the server.rs file
             // This is just a placeholder to satisfy the compiler
             Command::Select { namespace: _ } => Frame::SimpleString("OK".into()),
@@ -301,6 +319,19 @@ impl CommandHandler {
             Ok(false) => Frame::Integer(0), // Key does not exist
             Err(e) => {
                 error!("Error checking if key {} exists: {}", key, e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle CHECK command - verify data integrity for a key
+    async fn handle_check(&self, key: String) -> Frame {
+        debug!("Handling CHECK command for key: {}", key);
+        match self.namespace.check(key.as_bytes()) {
+            Ok(Some(true)) => Frame::Integer(1), // Data integrity check passed
+            Ok(Some(false)) | Ok(None) => Frame::Integer(0), // Check failed or key doesn't exist
+            Err(e) => {
+                error!("Error checking integrity for key {}: {}", key, e);
                 Frame::Error(format!("ERR {}", e))
             }
         }
