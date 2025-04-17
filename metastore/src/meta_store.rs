@@ -118,6 +118,18 @@ impl MetaStore {
         self.store.tree_open(DEFAULT_PATH_TREE)
     }
 
+    /// Iterates over all key-value pairs in the specified tree.
+    ///
+    /// # Arguments
+    /// * `tree_name` - The name of the tree to iterate
+    ///
+    /// # Returns
+    /// An iterator over Result<(Vec<u8>, Vec<u8>), MetaError>
+    pub fn iter_kv(&self, tree_name: &str) -> Result<crate::KeyValuePairs, MetaError> {
+        let tree = self.store.tree_ext_open(tree_name)?;
+        Ok(tree.iter_all())
+    }
+
     /// Checks if a bucket with the given name exists.
     ///
     /// # Arguments
