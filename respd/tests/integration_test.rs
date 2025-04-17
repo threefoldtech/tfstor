@@ -594,13 +594,19 @@ mod test_config {
 
         // Test 2: Check length of a non-existent key
         let non_existent_key = "non_existent_key";
-        let length_result: redis::RedisResult<Option<i64>> = redis::cmd("LENGTH")
-            .arg(non_existent_key)
-            .query(&mut conn);
+        let length_result: redis::RedisResult<Option<i64>> =
+            redis::cmd("LENGTH").arg(non_existent_key).query(&mut conn);
 
         // Should return nil for non-existent key
-        assert!(length_result.is_ok(), "LENGTH command should not error for non-existent key");
-        assert_eq!(length_result.unwrap(), None, "LENGTH should return nil for non-existent key");
+        assert!(
+            length_result.is_ok(),
+            "LENGTH command should not error for non-existent key"
+        );
+        assert_eq!(
+            length_result.unwrap(),
+            None,
+            "LENGTH should return nil for non-existent key"
+        );
 
         // Test 3: Set a key with longer value and check its length
         let long_key = "long_value_key";
@@ -617,5 +623,86 @@ mod test_config {
             .query(&mut conn)
             .expect("Failed to get length of long key");
         assert_eq!(length, 38, "Length should be 38 bytes");
+    }
+
+    #[test]
+    fn test_keytime_command() {
+        // Create a server
+        let server = TestServer::new();
+        let mut conn = server.connect();
+
+        // Test 1: Set a key and check its timestamp
+        let key = "keytime_test_key";
+        let value = "hello";
+        let _: () = redis::cmd("SET")
+            .arg(key)
+            .arg(value)
+            .query(&mut conn)
+            .expect("Failed to set key");
+
+        // Get the timestamp of the key
+        let timestamp: i64 = redis::cmd("KEYTIME")
+            .arg(key)
+            .query(&mut conn)
+            .expect("Failed to get timestamp");
+
+        // The timestamp should be a positive number representing Unix time
+        assert!(timestamp > 0, "Timestamp should be a positive number");
+
+        // Test 2: Check timestamp of a non-existent key
+        let non_existent_key = "non_existent_key";
+        let keytime_result: redis::RedisResult<Option<i64>> =
+            redis::cmd("KEYTIME").arg(non_existent_key).query(&mut conn);
+
+        // Should return nil for non-existent key
+        assert!(
+            keytime_result.is_ok(),
+            "KEYTIME command should not error for non-existent key"
+        );
+        assert_eq!(
+            keytime_result.unwrap(),
+            None,
+            "KEYTIME should return nil for non-existent key"
+        );
+
+        // Test 3: Set a key and verify the timestamp is updated
+        let update_key = "update_timestamp_key";
+
+        // Set the key first time
+        let _: () = redis::cmd("SET")
+            .arg(update_key)
+            .arg("initial value")
+            .query(&mut conn)
+            .expect("Failed to set update key");
+
+        // Get the initial timestamp
+        let initial_timestamp: i64 = redis::cmd("KEYTIME")
+            .arg(update_key)
+            .query(&mut conn)
+            .expect("Failed to get initial timestamp");
+
+        // Sleep for a short time to ensure timestamp will be different
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        // Update the key
+        let _: () = redis::cmd("SET")
+            .arg(update_key)
+            .arg("updated value")
+            .query(&mut conn)
+            .expect("Failed to update key");
+
+        // Get the updated timestamp
+        let updated_timestamp: i64 = redis::cmd("KEYTIME")
+            .arg(update_key)
+            .query(&mut conn)
+            .expect("Failed to get updated timestamp");
+
+        // The updated timestamp should be different from the initial one
+        // Note: This test might be flaky if the system is extremely fast and both operations
+        // happen within the same second. The sleep should prevent this.
+        assert!(
+            updated_timestamp >= initial_timestamp,
+            "Updated timestamp should be greater than or equal to the initial timestamp"
+        );
     }
 }

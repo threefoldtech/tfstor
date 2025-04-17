@@ -32,6 +32,7 @@ pub enum Command {
     Exists { key: String },
     Check { key: String },
     Length { key: String },
+    KeyTime { key: String },
     Select { namespace: String },
     NSNew { name: String },
     NSInfo { name: String },
@@ -258,6 +259,24 @@ impl Command {
 
                         Ok(Command::Length { key })
                     }
+                    "KEYTIME" => {
+                        if array.len() != 2 {
+                            return Err(CommandError::WrongNumberOfArguments(
+                                "KEYTIME".to_string(),
+                            ));
+                        }
+
+                        let key = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "KEYTIME key must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(Command::KeyTime { key })
+                    }
                     "AUTH" => {
                         if array.len() != 2 {
                             return Err(CommandError::WrongNumberOfArguments("AUTH".to_string()));
@@ -315,6 +334,7 @@ impl CommandHandler {
             Command::Exists { key } => self.handle_exists(key).await,
             Command::Check { key } => self.handle_check(key).await,
             Command::Length { key } => self.handle_length(key).await,
+            Command::KeyTime { key } => self.handle_keytime(key).await,
             Command::NSNew { name } => self.handle_nsnew(name).await,
             Command::NSInfo { name } => self.handle_nsinfo(name).await,
             Command::NSList => self.handle_nslist().await,
@@ -427,9 +447,22 @@ impl CommandHandler {
         debug!("Handling LENGTH command for key: {}", key);
         match self.namespace.length(key.as_bytes()) {
             Ok(Some(size)) => Frame::Integer(size as i64), // Return the size as an integer
-            Ok(None) => Frame::Null, // Key not found, return nil
+            Ok(None) => Frame::Null,                       // Key not found, return nil
             Err(e) => {
                 error!("Error getting length for key {}: {}", key, e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle KEYTIME command - get the last-modified timestamp of a key
+    async fn handle_keytime(&self, key: String) -> Frame {
+        debug!("Handling KEYTIME command for key: {}", key);
+        match self.namespace.keytime(key.as_bytes()) {
+            Ok(Some(timestamp)) => Frame::Integer(timestamp), // Return the timestamp as an integer
+            Ok(None) => Frame::Null,                          // Key not found, return nil
+            Err(e) => {
+                error!("Error getting timestamp for key {}: {}", key, e);
                 Frame::Error(format!("ERR {}", e))
             }
         }
