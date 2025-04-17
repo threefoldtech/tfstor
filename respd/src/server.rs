@@ -11,7 +11,7 @@ use crate::namespace::Namespace;
 use crate::resp::RespHelper;
 use crate::storage::Storage;
 
-pub async fn run(addr: String, storage: Storage) -> Result<()> {
+pub async fn run(addr: String, storage: Storage, admin_password: Option<String>) -> Result<()> {
     // Initialize the default namespace if it doesn't exist
     if let Err(e) = storage.init_namespace() {
         error!("Failed to initialize namespace: {}", e);
@@ -32,11 +32,14 @@ pub async fn run(addr: String, storage: Storage) -> Result<()> {
                 info!("Accepted connection from: {}", addr);
 
                 // Clone the storage for this connection
-                let storage = Arc::clone(&storage);
+                let storage = storage.clone();
+
+                // Clone the admin password for this connection
+                let admin_password = admin_password.clone();
 
                 // Spawn a new task to handle this connection
                 tokio::spawn(async move {
-                    if let Err(e) = process(socket, storage).await {
+                    if let Err(e) = process(socket, storage, admin_password).await {
                         error!("Error processing connection: {}", e);
                     }
                 });
@@ -48,9 +51,15 @@ pub async fn run(addr: String, storage: Storage) -> Result<()> {
     }
 }
 
-pub async fn process(socket: TcpStream, storage: Arc<Storage>) -> Result<()> {
+pub async fn process(
+    socket: TcpStream,
+    storage: Arc<Storage>,
+    admin_password: Option<String>,
+) -> Result<()> {
     // Create a connection abstraction
-    let mut conn = Conn::new(socket);
+    // If no admin password is required, all connections are admin by default
+    let is_admin = admin_password.is_none();
+    let mut conn = Conn::new(socket, is_admin);
 
     // Try to create a namespace for the default namespace
     let namespace = match Namespace::new(storage.clone(), conn.get_namespace()) {
@@ -127,6 +136,29 @@ pub async fn process(socket: TcpStream, storage: Arc<Storage>) -> Result<()> {
                                         e
                                     );
                                     Frame::Error(format!("ERR {}", e))
+                                }
+                            }
+                        }
+                        Ok(Command::Auth { password }) => {
+                            // Special handling for AUTH command to authenticate the connection
+                            debug!("Handling AUTH command");
+
+                            // Check if authentication is required
+                            match &admin_password {
+                                Some(admin_pwd) => {
+                                    // Admin password is set, verify the provided password
+                                    if password == *admin_pwd {
+                                        // Password matches, grant admin privileges
+                                        conn.set_admin(true);
+                                        Frame::SimpleString("OK".into())
+                                    } else {
+                                        // Password doesn't match
+                                        Frame::Error("ERR invalid password".into())
+                                    }
+                                }
+                                None => {
+                                    // No admin password set, all connections are already admin
+                                    Frame::SimpleString("OK".into())
                                 }
                             }
                         }
