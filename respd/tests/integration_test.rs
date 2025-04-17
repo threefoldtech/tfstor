@@ -16,6 +16,10 @@ struct TestServer {
 
 impl TestServer {
     fn new() -> Self {
+        Self::new_with_admin(None)
+    }
+
+    fn new_with_admin(admin_password: Option<String>) -> Self {
         // Create a temporary directory for the server data
         let temp_dir = tempdir().expect("Failed to create temp directory");
         let data_dir = temp_dir.path().to_path_buf();
@@ -29,14 +33,15 @@ impl TestServer {
 
         // Create a shutdown channel
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        
+
         // Start the server in a separate thread
         let thread_port = port;
         let thread_data_dir = data_dir.clone();
+        let thread_admin_password = admin_password.clone();
         let server_handle = thread::spawn(move || {
             // Create a new runtime for this thread
             let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-            
+
             rt.block_on(async {
                 // Create a TCP listener
                 let addr = format!("127.0.0.1:{}", thread_port);
@@ -71,9 +76,11 @@ impl TestServer {
                                     let storage = Arc::clone(&storage);
                                     
                                     // Spawn a new task to handle this connection
+                                    // Clone admin password for this connection
+                                    let admin_password = thread_admin_password.clone();     
                                     tokio::spawn(async move {
-                                        // Pass None for admin_password (no authentication required)
-                                        if let Err(e) = respd::server::process(socket, storage, None).await {
+                                        // Pass admin_password to the process function
+                                        if let Err(e) = respd::server::process(socket, storage, admin_password).await {
                                             eprintln!("Error processing connection: {}", e);
                                         }
                                     });
@@ -103,7 +110,10 @@ impl TestServer {
     fn find_available_port() -> u16 {
         // Try to bind to port 0, which will assign a random available port
         let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind to address");
-        let port = listener.local_addr().expect("Failed to get local address").port();
+        let port = listener
+            .local_addr()
+            .expect("Failed to get local address")
+            .port();
         // The listener will be dropped after this function returns, freeing the port
         port
     }
@@ -270,7 +280,7 @@ mod test_config {
         // Set multiple keys
         let keys = vec!["mkey1", "mkey2", "mkey3"];
         let values = vec!["mvalue1", "mvalue2", "mvalue3"];
-        
+
         for i in 0..keys.len() {
             let _: () = redis::cmd("SET")
                 .arg(keys[i])
@@ -353,7 +363,11 @@ mod test_config {
         // Should fail because the namespace doesn't exist yet
         assert!(select_result.is_err());
         if let Err(e) = select_result {
-            assert!(e.to_string().contains("Namespace not found"), "Expected error message to contain 'Namespace not found', got: {}", e);
+            assert!(
+                e.to_string().contains("Namespace not found"),
+                "Expected error message to contain 'Namespace not found', got: {}",
+                e
+            );
         }
 
         // Create a new namespace
@@ -433,10 +447,61 @@ mod test_config {
         // Note: The result should also include the default namespace
         assert!(result.contains(&"default".to_string()));
         for ns in &namespaces {
-            assert!(result.contains(&ns.to_string()), "Namespace {} not found in NSLIST result", ns);
+            assert!(
+                result.contains(&ns.to_string()),
+                "Namespace {} not found in NSLIST result",
+                ns
+            );
         }
 
         // Verify the total count (all created namespaces + default)
         assert_eq!(result.len(), namespaces.len() + 1);
+    }
+
+    #[test]
+    fn test_nsnew_admin_required() {
+        // Create a server with admin authentication required
+        let admin_password = "admin123".to_string();
+        let server = TestServer::new_with_admin(Some(admin_password.clone()));
+        let mut conn = server.connect();
+
+        // Try to create a namespace without authentication
+        let namespace_name = "test_namespace_no_auth";
+        let result = redis::cmd("NSNEW")
+            .arg(namespace_name)
+            .query::<String>(&mut conn);
+
+        // Should fail because admin privileges are required
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(
+                e.to_string().contains("requires admin privileges"),
+                "Expected error message to contain 'requires admin privileges', got: {}",
+                e
+            );
+        }
+
+        // Authenticate as admin
+        let auth_result: String = redis::cmd("AUTH")
+            .arg(&admin_password)
+            .query(&mut conn)
+            .expect("Failed to authenticate");
+        assert_eq!(auth_result, "OK");
+
+        // Now try to create a namespace with admin privileges
+        let result: String = redis::cmd("NSNEW")
+            .arg(namespace_name)
+            .query(&mut conn)
+            .expect("Failed to create namespace with admin privileges");
+
+        // Should succeed now
+        assert_eq!(result, "OK");
+
+        // Verify the namespace was created by selecting it
+        let select_result: String = redis::cmd("SELECT")
+            .arg(namespace_name)
+            .query(&mut conn)
+            .expect("Failed to select namespace");
+        assert_eq!(select_result, "OK");
     }
 }

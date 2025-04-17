@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 
     // Start server
     info!("Starting respd server on {}:{}", opt.host, opt.port);
-    if let Some(admin_pwd) = &opt.admin {
+    if opt.admin.is_some() {
         info!("Admin authentication is required");
     } else {
         info!("Admin authentication is disabled - all connections have admin privileges");

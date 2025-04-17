@@ -271,12 +271,19 @@ pub struct CommandHandler {
 
     // Namespace for this connection
     namespace: Namespace,
+
+    // Flag indicating if this connection has admin privileges
+    is_admin: bool,
 }
 
 impl CommandHandler {
     /// Create a new command handler
-    pub fn new(storage: Arc<Storage>, namespace: Namespace) -> Self {
-        Self { storage, namespace }
+    pub fn new(storage: Arc<Storage>, namespace: Namespace, is_admin: bool) -> Self {
+        Self {
+            storage,
+            namespace,
+            is_admin,
+        }
     }
 
     /// Execute a command and return the response frame
@@ -397,8 +404,16 @@ impl CommandHandler {
     }
 
     /// Handle NSNEW command - create a new namespace
+    /// This command requires admin privileges
     async fn handle_nsnew(&self, name: String) -> Frame {
         debug!("Handling NSNEW command for namespace: {}", name);
+
+        // Check if the connection has admin privileges
+        if !self.is_admin {
+            error!("Unauthorized attempt to create namespace: {}", name);
+            return Frame::Error("ERR NSNEW command requires admin privileges".into());
+        }
+
         match self.storage.create_namespace(&name) {
             Ok(_) => Frame::SimpleString("OK".into()),
             Err(e) => {

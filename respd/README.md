@@ -29,13 +29,14 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | CHECK <key>       | Verify data integrity for a key          | `CHECK mykey`                      |
 | AUTH <password>   | Authenticate as admin                    | `AUTH mypassword`                  |
 | SELECT <namespace>| Switch to a different namespace          | `SELECT mynamespace`               |
-| NSNEW <n>      | Create a new namespace                   | `NSNEW mynamespace`                |
+| NSNEW <n>      | Create a new namespace (admin only)      | `NSNEW mynamespace`                |
 | NSINFO <n>     | Show info about a namespace              | `NSINFO mynamespace`               |
 | NSLIST           | List all available namespaces            | `NSLIST`                           |
 
 - All commands are case-insensitive.
 - Namespace commands (`SELECT`, `NSNEW`, `NSINFO`, `NSLIST`) allow multi-tenant data separation.
 - Authentication with `AUTH` is only applicable if the server was started with the `--admin` parameter.
+- Some commands (like `NSNEW`) require admin privileges.
 
 ## Features
 - Redis protocol compatibility (subset)
