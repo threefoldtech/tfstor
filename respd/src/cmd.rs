@@ -31,6 +31,7 @@ pub enum Command {
     Del { key: String },
     Exists { key: String },
     Check { key: String },
+    Length { key: String },
     Select { namespace: String },
     NSNew { name: String },
     NSInfo { name: String },
@@ -238,7 +239,24 @@ impl Command {
                         } else {
                             None
                         };
+
                         Ok(Command::Ping { message })
+                    }
+                    "LENGTH" => {
+                        if array.len() != 2 {
+                            return Err(CommandError::WrongNumberOfArguments("LENGTH".to_string()));
+                        }
+
+                        let key = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "LENGTH key must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(Command::Length { key })
                     }
                     "AUTH" => {
                         if array.len() != 2 {
@@ -296,6 +314,7 @@ impl CommandHandler {
             Command::Del { key } => self.handle_del(key).await,
             Command::Exists { key } => self.handle_exists(key).await,
             Command::Check { key } => self.handle_check(key).await,
+            Command::Length { key } => self.handle_length(key).await,
             Command::NSNew { name } => self.handle_nsnew(name).await,
             Command::NSInfo { name } => self.handle_nsinfo(name).await,
             Command::NSList => self.handle_nslist().await,
@@ -398,6 +417,19 @@ impl CommandHandler {
             Ok(Some(false)) | Ok(None) => Frame::Integer(0), // Check failed or key doesn't exist
             Err(e) => {
                 error!("Error checking integrity for key {}: {}", key, e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle LENGTH command - get the size of a key's value
+    async fn handle_length(&self, key: String) -> Frame {
+        debug!("Handling LENGTH command for key: {}", key);
+        match self.namespace.length(key.as_bytes()) {
+            Ok(Some(size)) => Frame::Integer(size as i64), // Return the size as an integer
+            Ok(None) => Frame::Null, // Key not found, return nil
+            Err(e) => {
+                error!("Error getting length for key {}: {}", key, e);
                 Frame::Error(format!("ERR {}", e))
             }
         }
