@@ -154,7 +154,28 @@ pub async fn process(
                                     if password == *admin_pwd {
                                         // Password matches, grant admin privileges
                                         conn.set_admin(true);
-                                        Frame::SimpleString("OK".into())
+
+                                        // Update the handler with the new admin status
+                                        // We need to recreate the namespace from the current namespace name
+                                        match Namespace::new(storage.clone(), conn.get_namespace())
+                                        {
+                                            Ok(namespace) => {
+                                                // Update the handler with the new admin status
+                                                handler = CommandHandler::new(
+                                                    storage.clone(),
+                                                    namespace,
+                                                    conn.is_admin(),
+                                                );
+                                                Frame::SimpleString("OK".into())
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    "Error recreating namespace after AUTH: {}",
+                                                    e
+                                                );
+                                                Frame::Error(format!("ERR {}", e))
+                                            }
+                                        }
                                     } else {
                                         // Password doesn't match
                                         Frame::Error("ERR invalid password".into())

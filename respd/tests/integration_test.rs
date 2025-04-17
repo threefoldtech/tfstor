@@ -504,4 +504,69 @@ mod test_config {
             .expect("Failed to select namespace");
         assert_eq!(select_result, "OK");
     }
+
+    #[test]
+    fn test_auth_command() {
+        // Create a server with admin authentication required
+        let admin_password = "secure_password".to_string();
+        let server = TestServer::new_with_admin(Some(admin_password.clone()));
+        let mut conn = server.connect();
+
+        // Test 1: Authenticate with correct password (positive case)
+        let auth_result: String = redis::cmd("AUTH")
+            .arg(&admin_password)
+            .query(&mut conn)
+            .expect("Failed to authenticate with correct password");
+        assert_eq!(
+            auth_result, "OK",
+            "Authentication with correct password should return OK"
+        );
+
+        // Test 2: Authenticate with incorrect password (negative case)
+        let wrong_password = "wrong_password";
+        let auth_result = redis::cmd("AUTH")
+            .arg(wrong_password)
+            .query::<String>(&mut conn);
+
+        // Should fail with invalid password error
+        assert!(
+            auth_result.is_err(),
+            "Authentication with wrong password should fail"
+        );
+        if let Err(e) = auth_result {
+            assert!(
+                e.to_string().contains("invalid password"),
+                "Expected error message to contain 'invalid password', got: {}",
+                e
+            );
+        }
+
+        // Test 3: Server without admin password requirement
+        let server_no_auth = TestServer::new(); // No admin password required
+        let mut conn_no_auth = server_no_auth.connect();
+
+        // AUTH command should succeed even with any password
+        let random_password = "random_password";
+        let auth_result: String = redis::cmd("AUTH")
+            .arg(random_password)
+            .query(&mut conn_no_auth)
+            .expect("Failed to authenticate on server with no auth required");
+        assert_eq!(
+            auth_result, "OK",
+            "Authentication on server with no auth required should always return OK"
+        );
+
+        // Test 4: AUTH command with wrong number of arguments
+        let auth_result = redis::cmd("AUTH").query::<String>(&mut conn);
+
+        // Should fail with wrong number of arguments error
+        assert!(auth_result.is_err(), "AUTH without password should fail");
+        if let Err(e) = auth_result {
+            assert!(
+                e.to_string().contains("Wrong number of arguments"),
+                "Expected error message to contain 'Wrong number of arguments', got: {}",
+                e
+            );
+        }
+    }
 }
