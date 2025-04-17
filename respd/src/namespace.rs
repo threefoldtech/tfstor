@@ -64,6 +64,15 @@ impl Namespace {
         self.tree.contains_key(key)
     }
 
+    /// Get the length (size) of a key's value
+    /// Returns None if the key doesn't exist
+    pub fn length(&self, key: &[u8]) -> Result<Option<u64>, MetaError> {
+        match self.get_object(key)? {
+            Some(obj) => Ok(Some(obj.size())),
+            None => Ok(None),
+        }
+    }
+
     pub fn check(&self, key: &[u8]) -> Result<Option<bool>, MetaError> {
         let obj = self.get_object(key)?;
         match obj {

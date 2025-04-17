@@ -569,4 +569,53 @@ mod test_config {
             );
         }
     }
+
+    #[test]
+    fn test_length_command() {
+        // Create a server
+        let server = TestServer::new();
+        let mut conn = server.connect();
+
+        // Test 1: Set a key and check its length
+        let key = "length_test_key";
+        let value = "hello"; // 5 bytes
+        let _: () = redis::cmd("SET")
+            .arg(key)
+            .arg(value)
+            .query(&mut conn)
+            .expect("Failed to set key");
+
+        // Get the length of the key
+        let length: i64 = redis::cmd("LENGTH")
+            .arg(key)
+            .query(&mut conn)
+            .expect("Failed to get length");
+        assert_eq!(length, 5, "Length should be 5 bytes");
+
+        // Test 2: Check length of a non-existent key
+        let non_existent_key = "non_existent_key";
+        let length_result: redis::RedisResult<Option<i64>> = redis::cmd("LENGTH")
+            .arg(non_existent_key)
+            .query(&mut conn);
+
+        // Should return nil for non-existent key
+        assert!(length_result.is_ok(), "LENGTH command should not error for non-existent key");
+        assert_eq!(length_result.unwrap(), None, "LENGTH should return nil for non-existent key");
+
+        // Test 3: Set a key with longer value and check its length
+        let long_key = "long_value_key";
+        let long_value = "This is a longer value with more bytes"; // 38 bytes
+        let _: () = redis::cmd("SET")
+            .arg(long_key)
+            .arg(long_value)
+            .query(&mut conn)
+            .expect("Failed to set long key");
+
+        // Get the length of the long key
+        let length: i64 = redis::cmd("LENGTH")
+            .arg(long_key)
+            .query(&mut conn)
+            .expect("Failed to get length of long key");
+        assert_eq!(length, 38, "Length should be 38 bytes");
+    }
 }

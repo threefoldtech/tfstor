@@ -27,6 +27,7 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | EXISTS <key>      | Check if a key exists                    | `EXISTS mykey`                     |
 | PING [message]    | Ping the server (optionally with message)| `PING` or `PING hello`             |
 | CHECK <key>       | Verify data integrity for a key          | `CHECK mykey`                      |
+| LENGTH <key>      | Get the size (in bytes) of a key's value, returns nil if key doesn't exist | `LENGTH mykey`                     |
 | AUTH <password>   | Authenticate as admin                    | `AUTH mypassword`                  |
 | SELECT <namespace>| Switch to a different namespace          | `SELECT mynamespace`               |
 | NSNEW <n>      | Create a new namespace (admin only)      | `NSNEW mynamespace`                |
