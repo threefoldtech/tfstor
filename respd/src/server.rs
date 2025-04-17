@@ -85,8 +85,8 @@ pub async fn process(
         }
     };
 
-    // Create a command handler with the connection's namespace
-    let mut handler = CommandHandler::new(storage.clone(), namespace);
+    // Create a command handler with the connection's namespace and admin status
+    let mut handler = CommandHandler::new(storage.clone(), namespace, conn.is_admin());
 
     // Use BytesMut for zero-copy operations
     let mut buffer = BytesMut::with_capacity(4096);
@@ -125,7 +125,11 @@ pub async fn process(
                             match Namespace::new(storage.clone(), conn.get_namespace()) {
                                 Ok(namespace) => {
                                     // Update the handler's tree to use the new namespace
-                                    handler = CommandHandler::new(storage.clone(), namespace);
+                                    handler = CommandHandler::new(
+                                        storage.clone(),
+                                        namespace,
+                                        conn.is_admin(),
+                                    );
                                     Frame::SimpleString("OK".into())
                                 }
                                 Err(e) => {
