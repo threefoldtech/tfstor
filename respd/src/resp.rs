@@ -10,8 +10,6 @@ pub enum RespError {
     Protocol(String),
 }
 
-
-
 /// Helper functions for Redis RESP protocol
 pub struct RespHelper;
 
@@ -65,8 +63,9 @@ impl RespHelper {
                 if e.to_string().contains("Buffer too small") {
                     // If buffer is too small, try with a much larger buffer
                     let mut larger_buffer = vec![0; 16384]; // 16KB should be enough for most responses
-                    let len = redis_protocol::resp2::encode::encode(&mut larger_buffer, frame, false)
-                        .map_err(|e| RespError::Protocol(e.to_string()))?;
+                    let len =
+                        redis_protocol::resp2::encode::encode(&mut larger_buffer, frame, false)
+                            .map_err(|e| RespError::Protocol(e.to_string()))?;
                     larger_buffer.truncate(len);
                     Ok(larger_buffer)
                 } else {
@@ -75,6 +74,4 @@ impl RespHelper {
             }
         }
     }
-
-
 }
