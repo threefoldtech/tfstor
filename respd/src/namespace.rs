@@ -73,6 +73,23 @@ impl Namespace {
         }
     }
 
+    /// Get the last-modified timestamp of a key
+    /// Returns None if the key doesn't exist
+    pub fn keytime(&self, key: &[u8]) -> Result<Option<i64>, MetaError> {
+        match self.get_object(key)? {
+            Some(obj) => {
+                // Get the last modified time as Unix timestamp (seconds since epoch)
+                let system_time = obj.last_modified();
+                let timestamp = system_time
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                Ok(Some(timestamp))
+            }
+            None => Ok(None),
+        }
+    }
+
     pub fn check(&self, key: &[u8]) -> Result<Option<bool>, MetaError> {
         let obj = self.get_object(key)?;
         match obj {
