@@ -406,4 +406,36 @@ mod test_config {
 
         assert_eq!(value, test_value);
     }
+
+    #[test]
+    fn test_nslist() {
+        let server = TestServer::new();
+        let mut conn = server.connect();
+
+        // Create a few namespaces for testing
+        let namespaces = vec!["ns1", "ns2", "ns3"];
+
+        for ns in &namespaces {
+            let result: String = redis::cmd("NSNEW")
+                .arg(ns)
+                .query(&mut conn)
+                .expect("Failed to create namespace");
+            assert_eq!(result, "OK");
+        }
+
+        // Execute NSLIST command
+        let result: Vec<String> = redis::cmd("NSLIST")
+            .query(&mut conn)
+            .expect("Failed to execute NSLIST command");
+
+        // Verify that all created namespaces are in the result
+        // Note: The result should also include the default namespace
+        assert!(result.contains(&"default".to_string()));
+        for ns in &namespaces {
+            assert!(result.contains(&ns.to_string()), "Namespace {} not found in NSLIST result", ns);
+        }
+
+        // Verify the total count (all created namespaces + default)
+        assert_eq!(result.len(), namespaces.len() + 1);
+    }
 }
