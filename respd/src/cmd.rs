@@ -34,6 +34,7 @@ pub enum Command {
     Select { namespace: String },
     NSNew { name: String },
     NSInfo { name: String },
+    NSList,
     // Add more commands as needed
 }
 
@@ -129,6 +130,13 @@ impl Command {
                         };
 
                         Ok(Command::NSInfo { name })
+                    }
+                    "NSLIST" => {
+                        if array.len() != 1 {
+                            return Err(CommandError::WrongNumberOfArguments("NSLIST".to_string()));
+                        }
+
+                        Ok(Command::NSList)
                     }
                     "DEL" => {
                         if array.len() != 2 {
@@ -268,9 +276,11 @@ impl CommandHandler {
             Command::Check { key } => self.handle_check(key).await,
             Command::NSNew { name } => self.handle_nsnew(name).await,
             Command::NSInfo { name } => self.handle_nsinfo(name).await,
-            // SELECT command is handled specially in the server.rs file
-            // This is just a placeholder to satisfy the compiler
-            Command::Select { namespace: _ } => Frame::SimpleString("OK".into()),
+            Command::NSList => self.handle_nslist().await,
+            Command::Select { .. } => {
+                // SELECT is handled at a higher level in the connection handler
+                Frame::Error("ERR SELECT should be handled at connection level".into())
+            }
         }
     }
 
@@ -403,6 +413,40 @@ impl CommandHandler {
             }
             Err(e) => {
                 error!("Error getting namespace info for {}: {}", name, e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle NSLIST command - list all namespaces
+    async fn handle_nslist(&self) -> Frame {
+        debug!("Handling NSLIST command");
+
+        // Use iter_namespace to get a stream of namespaces
+        match self.storage.iter_namespace() {
+            Ok(namespace_iter) => {
+                // Create an array to hold the namespace names
+                let mut namespaces = Vec::new();
+
+                // Process each namespace directly as we receive it
+                for result in namespace_iter {
+                    match result {
+                        Ok(meta) => {
+                            // Add just the namespace name to the array
+                            namespaces.push(Frame::BulkString(meta.name.into_bytes()));
+                        }
+                        Err(e) => {
+                            error!("Error processing namespace: {}", e);
+                            // Skip this namespace and continue with others
+                        }
+                    }
+                }
+
+                // Return the array of namespace names
+                Frame::Array(namespaces)
+            }
+            Err(e) => {
+                error!("Error listing namespaces: {}", e);
                 Frame::Error(format!("ERR {}", e))
             }
         }

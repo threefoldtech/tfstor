@@ -16,6 +16,33 @@ pub struct Storage {
 }
 
 impl Storage {
+    /// Iterate over all namespaces in the storage
+    ///
+    /// Returns an iterator that yields NamespaceMeta structs for each namespace
+    pub fn iter_namespace(
+        &self,
+    ) -> Result<impl Iterator<Item = Result<NamespaceMeta, StorageError>>, StorageError> {
+        // Get the all buckets tree which contains namespace metadata
+        let tree = self.store.get_allbuckets_tree()?;
+        let tree_name = "_BUCKETS";
+
+        // Use MetaStore::iter_kv to iterate over all key-value pairs in the tree
+        let kv_pairs = self.store.iter_kv(tree_name)?;
+
+        // Transform the iterator to yield NamespaceMeta structs
+        let namespace_iter = kv_pairs.map(|kv_result| {
+            kv_result
+                .map_err(|e| StorageError::MetaError(e.to_string()))
+                .and_then(|(_key, value)| {
+                    // Create NamespaceMeta struct from the value using from_msgpack
+                    NamespaceMeta::from_msgpack(&value)
+                        .map_err(|e| StorageError::MetaError(e.to_string()))
+                })
+        });
+
+        Ok(namespace_iter)
+    }
+
     /// Create a new MetaStorage instance
     pub fn new(data_dir: PathBuf, inlined_metadata_size: Option<usize>) -> Self {
         // Create the metastore with FjallStore backend
