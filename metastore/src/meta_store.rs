@@ -19,7 +19,7 @@ pub struct MetaStore {
 
 /// Default tree names used by the MetaStore
 /// These constants define the names of the special trees used internally
-const DEFAULT_BUCKET_TREE: &str = "_BUCKETS";
+const BUCKET_LIST_TREE: &str = "_BUCKETS";
 const DEFAULT_BLOCK_TREE: &str = "_BLOCKS";
 const DEFAULT_PATH_TREE: &str = "_PATHS";
 
@@ -55,15 +55,15 @@ impl MetaStore {
         self.inlined_metadata_size - Object::minimum_inline_metadata_size()
     }
 
-    /// Returns the tree which contains all the buckets.
+    /// Returns the tree which contains list of all the buckets.
     ///
     /// This tree is used to store the bucket lists and provide
     /// the CRUD operations for the bucket list.
     ///
     /// # Returns
     /// A tree with extended functionality for bucket operations or an error
-    pub fn get_allbuckets_tree(&self) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
-        self.store.tree_ext_open(DEFAULT_BUCKET_TREE)
+    pub fn get_bucketlist_tree(&self) -> Result<Box<dyn MetaTreeExt + Send + Sync>, MetaError> {
+        self.store.tree_ext_open(BUCKET_LIST_TREE)
     }
 
     /// Returns the tree for a specific bucket with extended methods.
@@ -159,7 +159,7 @@ impl MetaStore {
     /// Success or an error if the insertion fails
     pub fn insert_bucket(&self, bucket_name: &str, raw_bucket: Vec<u8>) -> Result<(), MetaError> {
         // Insert the bucket metadata into the buckets tree
-        let buckets = self.store.tree_open(DEFAULT_BUCKET_TREE)?;
+        let buckets = self.store.tree_open(BUCKET_LIST_TREE)?;
         buckets.insert(bucket_name.as_bytes(), raw_bucket)?;
 
         // Create the bucket tree if it doesn't exist
@@ -177,8 +177,8 @@ impl MetaStore {
     /// This method currently loads all buckets into memory at once.
     /// TODO: This should be paginated and return a stream for better scalability.
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
-        let bucket = self.get_allbuckets_tree()?;
-        let buckets = bucket
+        let bucketlist_tree = self.get_bucketlist_tree()?;
+        let buckets = bucketlist_tree
             .iter_all()
             .filter_map(|result| {
                 let (_, value) = match result {
@@ -308,7 +308,7 @@ impl MetaStore {
     /// # Returns
     /// The number of keys in the bucket tree
     pub fn num_keys(&self) -> usize {
-        self.store.num_keys(DEFAULT_BUCKET_TREE).unwrap()
+        self.store.num_keys(BUCKET_LIST_TREE).unwrap()
     }
 
     /// Returns the total disk space used by the metadata store.
@@ -324,7 +324,7 @@ impl Debug for MetaStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MetaStore")
             .field("store", &"<Store>")
-            .field("bucket_tree_name", &DEFAULT_BUCKET_TREE)
+            .field("bucket_tree_name", &BUCKET_LIST_TREE)
             .field("block_tree_name", &DEFAULT_BLOCK_TREE)
             .field("path_tree_name", &DEFAULT_PATH_TREE)
             .field("inlined_metadata_size", &self.inlined_metadata_size)
