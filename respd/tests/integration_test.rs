@@ -72,7 +72,8 @@ impl TestServer {
                                     
                                     // Spawn a new task to handle this connection
                                     tokio::spawn(async move {
-                                        if let Err(e) = respd::server::process(socket, storage).await {
+                                        // Pass None for admin_password (no authentication required)
+                                        if let Err(e) = respd::server::process(socket, storage, None).await {
                                             eprintln!("Error processing connection: {}", e);
                                         }
                                     });

@@ -28,6 +28,11 @@ struct Opt {
     /// Size limit for inlined metadata in bytes
     #[clap(long)]
     inlined_metadata_size: Option<usize>,
+
+    /// Admin password for authentication
+    /// If not provided, all connections are automatically granted admin privileges
+    #[clap(long)]
+    admin: Option<String>,
 }
 
 #[tokio::main]
@@ -51,6 +56,11 @@ async fn main() -> Result<()> {
 
     // Start server
     info!("Starting respd server on {}:{}", opt.host, opt.port);
+    if let Some(admin_pwd) = &opt.admin {
+        info!("Admin authentication is required");
+    } else {
+        info!("Admin authentication is disabled - all connections have admin privileges");
+    }
     let addr = format!("{}:{}", opt.host, opt.port);
-    server::run(addr, storage).await
+    server::run(addr, storage, opt.admin).await
 }

@@ -8,6 +8,12 @@
 respd --data-dir=/tmp/respd/data
 ```
 
+With admin authentication:
+
+```console
+respd --data-dir=/tmp/respd/data --admin=mypassword
+```
+
 By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redis client.
 
 ## Supported Commands
@@ -21,6 +27,7 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | EXISTS <key>      | Check if a key exists                    | `EXISTS mykey`                     |
 | PING [message]    | Ping the server (optionally with message)| `PING` or `PING hello`             |
 | CHECK <key>       | Verify data integrity for a key          | `CHECK mykey`                      |
+| AUTH <password>   | Authenticate as admin                    | `AUTH mypassword`                  |
 | SELECT <namespace>| Switch to a different namespace          | `SELECT mynamespace`               |
 | NSNEW <n>      | Create a new namespace                   | `NSNEW mynamespace`                |
 | NSINFO <n>     | Show info about a namespace              | `NSINFO mynamespace`               |
@@ -28,6 +35,7 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 
 - All commands are case-insensitive.
 - Namespace commands (`SELECT`, `NSNEW`, `NSINFO`, `NSLIST`) allow multi-tenant data separation.
+- Authentication with `AUTH` is only applicable if the server was started with the `--admin` parameter.
 
 ## Features
 - Redis protocol compatibility (subset)

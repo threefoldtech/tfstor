@@ -8,14 +8,17 @@ pub struct Conn {
     socket: TcpStream,
     /// Namespace for the connection
     namespace: String,
+    /// Flag indicating if this connection has admin privileges
+    admin: bool,
 }
 
 impl Conn {
     /// Create a new connection
-    pub fn new(socket: TcpStream) -> Self {
+    pub fn new(socket: TcpStream, is_admin: bool) -> Self {
         Self {
             socket,
             namespace: "default".to_string(),
+            admin: is_admin,
         }
     }
 
@@ -32,6 +35,16 @@ impl Conn {
     /// Read data from the socket into the provided buffer
     pub async fn read_buf(&mut self, buf: &mut BytesMut) -> std::io::Result<usize> {
         self.socket.read_buf(buf).await
+    }
+
+    /// Check if the connection has admin privileges
+    pub fn is_admin(&self) -> bool {
+        self.admin
+    }
+
+    /// Set admin status for this connection
+    pub fn set_admin(&mut self, admin: bool) {
+        self.admin = admin;
     }
 
     /// Write data to the socket

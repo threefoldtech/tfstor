@@ -35,6 +35,7 @@ pub enum Command {
     NSNew { name: String },
     NSInfo { name: String },
     NSList,
+    Auth { password: String },
     // Add more commands as needed
 }
 
@@ -239,6 +240,20 @@ impl Command {
                         };
                         Ok(Command::Ping { message })
                     }
+                    "AUTH" => {
+                        if array.len() != 2 {
+                            return Err(CommandError::WrongNumberOfArguments("AUTH".to_string()));
+                        }
+                        let password = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "AUTH password must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+                        Ok(Command::Auth { password })
+                    }
                     _ => Err(CommandError::UnknownCommand(command_name)),
                 }
             }
@@ -280,6 +295,10 @@ impl CommandHandler {
             Command::Select { .. } => {
                 // SELECT is handled at a higher level in the connection handler
                 Frame::Error("ERR SELECT should be handled at connection level".into())
+            }
+            Command::Auth { .. } => {
+                // AUTH is handled at a higher level in the connection handler
+                Frame::Error("ERR AUTH should be handled at connection level".into())
             }
         }
     }
