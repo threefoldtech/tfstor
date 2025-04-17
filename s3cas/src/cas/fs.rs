@@ -250,8 +250,8 @@ impl CasFS {
     // TODO: this is very much not optimal
     pub async fn bucket_delete(&self, bucket_name: &str) -> Result<(), MetaError> {
         // remove from the bucket list tree/partition
-        let bmt = self.meta_store.get_allbuckets_tree()?;
-        bmt.remove(bucket_name.as_bytes())?;
+        let bucketlist_tree = self.meta_store.get_bucketlist_tree()?;
+        bucketlist_tree.remove(bucket_name.as_bytes())?;
 
         // removes all objects in the bucket
         let bucket = self.meta_store.get_bucket_ext(bucket_name)?;

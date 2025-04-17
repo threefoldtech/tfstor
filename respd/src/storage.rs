@@ -59,8 +59,8 @@ impl Storage {
         if !self.store.bucket_exists(name)? {
             return Err(StorageError::NamespaceNotFound);
         }
-        let tree = self.store.get_allbuckets_tree()?;
-        let raw = tree
+        let bucketlist_tree = self.store.get_bucketlist_tree()?;
+        let raw = bucketlist_tree
             .get(name.as_bytes())
             .map_err(|e| StorageError::MetaError(e.to_string()))?;
         if let Some(raw) = raw {
@@ -88,7 +88,7 @@ impl Storage {
         &self,
     ) -> Result<impl Iterator<Item = Result<NamespaceMeta, StorageError>>, StorageError> {
         // Get the all buckets tree which contains namespace metadata
-        let bucketlist_tree = self.store.get_allbuckets_tree()?;
+        let bucketlist_tree = self.store.get_bucketlist_tree()?;
 
         // Use tree.iter_all to iterate over all key-value pairs in the tree
         let kv_pairs = bucketlist_tree.iter_all();
