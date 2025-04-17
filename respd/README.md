@@ -22,17 +22,21 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | PING [message]    | Ping the server (optionally with message)| `PING` or `PING hello`             |
 | CHECK <key>       | Verify data integrity for a key          | `CHECK mykey`                      |
 | SELECT <namespace>| Switch to a different namespace          | `SELECT mynamespace`               |
-| NSNEW <name>      | Create a new namespace                   | `NSNEW mynamespace`                |
-| NSINFO <name>     | Show info about a namespace              | `NSINFO mynamespace`               |
+| NSNEW <n>      | Create a new namespace                   | `NSNEW mynamespace`                |
+| NSINFO <n>     | Show info about a namespace              | `NSINFO mynamespace`               |
+| NSLIST           | List all available namespaces            | `NSLIST`                           |
 
 - All commands are case-insensitive.
-- Namespace commands (`SELECT`, `NSNEW`, `NSINFO`) allow multi-tenant data separation.
+- Namespace commands (`SELECT`, `NSNEW`, `NSINFO`, `NSLIST`) allow multi-tenant data separation.
 
 ## Features
 - Redis protocol compatibility (subset)
 - Namespace support
 - Data integrity checking
 - Simple to run and integrate
+
+## Known Limitations
+- The `NSLIST` command currently collects all namespace names before sending the response. Future improvements will implement streaming responses to handle large numbers of namespaces more efficiently.
 
 ---
 
