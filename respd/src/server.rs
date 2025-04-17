@@ -12,6 +12,12 @@ use crate::resp::RespHelper;
 use crate::storage::Storage;
 
 pub async fn run(addr: String, storage: Storage) -> Result<()> {
+    // Initialize the default namespace if it doesn't exist
+    if let Err(e) = storage.init_namespace() {
+        error!("Failed to initialize default namespace: {}", e);
+        return Err(anyhow::anyhow!("Failed to initialize default namespace: {}", e));
+    }
+    
     // Create a TCP listener
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on: {}", addr);

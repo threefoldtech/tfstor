@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use metastore::{BaseMetaTree, Durability, FjallStore, MetaError, MetaStore};
 
@@ -91,6 +92,20 @@ impl Storage {
             .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
         self.store.insert_bucket(name, namespace_meta_raw)?;
         self.get_namespace(name)
+    }
+    
+    /// Initialize the default namespace if it doesn't exist
+    pub fn init_namespace(&self) -> Result<(), StorageError> {
+        let default_namespace = "default";
+        
+        // Check if the default namespace exists
+        if !self.store.bucket_exists(default_namespace)? {
+            info!("Default namespace not found, creating it");
+            // Create the default namespace
+            self.create_namespace(default_namespace)?;
+        }
+        
+        Ok(())
     }
 }
 
