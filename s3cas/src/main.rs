@@ -96,7 +96,10 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum InspectCommand {
     // number of keys
-    NumKeys,
+    NumKeys {
+        /// Name of the bucket to count keys for
+        bucket_name: String,
+    },
     DiskSpace,
 }
 
@@ -119,9 +122,9 @@ fn main() -> Result<()> {
             meta_root,
             metadata_db,
         } => match command {
-            InspectCommand::NumKeys => {
-                let num_keys = num_keys(meta_root, metadata_db)?;
-                println!("Number of keys: {}", num_keys);
+            InspectCommand::NumKeys { bucket_name } => {
+                let num_keys = num_keys(meta_root, metadata_db, &bucket_name)?;
+                println!("Number of keys in bucket '{}': {}", bucket_name, num_keys);
             }
             InspectCommand::DiskSpace => {
                 let disk_space = disk_space(meta_root, metadata_db);

@@ -114,11 +114,6 @@ impl Store for FjallStore {
         Transaction::new(Box::new(FjallTransaction::new(tx, Arc::new(self.clone()))))
     }
 
-    fn num_keys(&self, _: &str) -> Result<usize, MetaError> {
-        unimplemented!("fjall with transaction does not support number of keys");
-        // fjall with transaction does not support this
-    }
-
     fn disk_space(&self) -> u64 {
         self.keyspace.disk_space()
     }
@@ -238,12 +233,8 @@ impl BaseMetaTree for FjallTree {
         }
     }
 
-    fn len(&self) -> Result<usize, MetaError> {
-        let read_tx = self.keyspace.read_tx();
-        let len = read_tx
-            .len(&self.partition)
-            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
-        Ok(len)
+    fn len(&self) -> usize {
+        self.partition.approximate_len()
     }
 }
 

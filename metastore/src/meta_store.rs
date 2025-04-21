@@ -301,14 +301,15 @@ impl MetaStore {
         self.store.begin_transaction()
     }
 
-    /// Returns the total number of keys in the bucket tree.
+    /// Returns the total number of keys in a tree.
     ///
     /// This is primarily used for monitoring and debugging purposes.
     ///
     /// # Returns
-    /// The number of keys in the bucket tree
-    pub fn num_keys(&self) -> usize {
-        self.store.num_keys(BUCKET_LIST_TREE).unwrap()
+    /// The number of keys in the a tree
+    pub fn num_keys(&self, tree_name: &str) -> Result<usize, MetaError> {
+        let tree = self.store.tree_open(tree_name)?;
+        Ok(tree.len())
     }
 
     /// Returns the total disk space used by the metadata store.
@@ -365,7 +366,7 @@ impl BlockTree {
     /// # Returns
     /// The number of blocks or an error
     #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> Result<usize, MetaError> {
+    pub fn len(&self) -> usize {
         self.tree.len()
     }
 
