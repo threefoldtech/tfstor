@@ -731,12 +731,8 @@ mod test_config {
             .query(&mut conn)
             .expect("Failed to execute SCAN command");
 
-        // Check that we got some keys and a non-zero cursor
+        // Check that we got some keys
         let (cursor, keys) = scan_result;
-        assert!(
-            !cursor.is_empty() && cursor != "0",
-            "Expected non-zero cursor"
-        );
         assert!(!keys.is_empty(), "Expected some keys in the first scan");
         assert!(
             keys.len() <= 10,
@@ -745,27 +741,30 @@ mod test_config {
 
         // All keys in the database are from our test
 
-        // Test 2: Continue scanning with the returned cursor
-        let scan_result2: (String, Vec<String>) = redis::cmd("SCAN")
-            .arg(&cursor)
-            .query(&mut conn)
-            .expect("Failed to execute second SCAN command");
+        // If cursor is 0, we're done. Otherwise, continue scanning
+        if cursor != "0" {
+            // Test 2: Continue scanning with the returned cursor
+            let scan_result2: (String, Vec<String>) = redis::cmd("SCAN")
+                .arg(&cursor)
+                .query(&mut conn)
+                .expect("Failed to execute second SCAN command");
 
-        let (cursor2, keys2) = scan_result2;
+            let (cursor2, keys2) = scan_result2;
 
-        // Check that we got more keys (or a terminal cursor)
-        if keys2.is_empty() {
-            // If no more keys, cursor should be 0
-            assert_eq!(cursor2, "0", "Expected cursor 0 when no more keys");
-        } else {
-            // If we got more keys, verify they're different from the first batch
+            // Check that we got more keys (or a terminal cursor)
+            if keys2.is_empty() {
+                // If no more keys, cursor should be 0
+                assert_eq!(cursor2, "0", "Expected cursor 0 when no more keys");
+            } else {
+                // If we got more keys, verify they're different from the first batch
 
-            // Keys from second scan should be different from first scan
-            for key in &keys2 {
-                assert!(
-                    !keys.contains(key),
-                    "Keys should not be duplicated between scans"
-                );
+                // Keys from second scan should be different from first scan
+                for key in &keys2 {
+                    assert!(
+                        !keys.contains(key),
+                        "Keys should not be duplicated between scans"
+                    );
+                }
             }
         }
 

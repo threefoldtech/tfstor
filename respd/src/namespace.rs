@@ -114,7 +114,11 @@ impl Namespace {
         self.tree.len()
     }
 
-    pub fn scan(&self, start_after: Option<Vec<u8>>) -> Result<Vec<Vec<u8>>, MetaError> {
+    pub fn scan(
+        &self,
+        start_after: Option<Vec<u8>>,
+        num_keys: u32,
+    ) -> Result<Vec<Vec<u8>>, MetaError> {
         let mut keys = Vec::new();
         let mut count = 0;
 
@@ -123,7 +127,7 @@ impl Namespace {
                 Ok((key, _)) => {
                     keys.push(key);
                     count += 1;
-                    if count >= 10 {
+                    if count >= num_keys {
                         break;
                     }
                 }
