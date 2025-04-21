@@ -616,8 +616,7 @@ impl CommandHandler {
                     let next_cursor = String::from_utf8_lossy(last_key).to_string();
 
                     // Convert keys to frames
-                    let key_frames: Vec<Frame> =
-                        keys.into_iter().map(|k| Frame::BulkString(k)).collect();
+                    let key_frames: Vec<Frame> = keys.into_iter().map(Frame::BulkString).collect();
 
                     // Return [cursor, [keys...]]
                     let response = vec![

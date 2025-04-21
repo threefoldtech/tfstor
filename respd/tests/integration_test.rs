@@ -64,7 +64,6 @@ impl TestServer {
                 tokio::select! {
                     _ = shutdown_future => {
                         println!("Server shutting down");
-                        return;
                     }
                     _ = async {
                         loop {
@@ -110,12 +109,11 @@ impl TestServer {
     fn find_available_port() -> u16 {
         // Try to bind to port 0, which will assign a random available port
         let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind to address");
-        let port = listener
+        // The listener will be dropped after this function returns, freeing the port
+        listener
             .local_addr()
             .expect("Failed to get local address")
-            .port();
-        // The listener will be dropped after this function returns, freeing the port
-        port
+            .port()
     }
 
     fn connect(&self) -> Connection {
@@ -278,8 +276,8 @@ mod test_config {
         let mut conn = server.connect();
 
         // Set multiple keys
-        let keys = vec!["mkey1", "mkey2", "mkey3"];
-        let values = vec!["mvalue1", "mvalue2", "mvalue3"];
+        let keys = ["mkey1", "mkey2", "mkey3"];
+        let values = ["mvalue1", "mvalue2", "mvalue3"];
 
         for i in 0..keys.len() {
             let _: () = redis::cmd("SET")
@@ -724,7 +722,7 @@ mod test_config {
                 .arg(&key)
                 .arg(&value)
                 .query(&mut conn)
-                .expect(&format!("Failed to set key {}", key));
+                .unwrap_or_else(|_| panic!("Failed to set key {}", key));
         }
 
         // Test 1: Initial scan with cursor 0
