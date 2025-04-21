@@ -365,9 +365,12 @@ impl BlockTree {
     ///
     /// # Returns
     /// The number of blocks or an error
-    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.tree.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tree.is_empty().unwrap()
     }
 
     /// Removes a block from the tree.

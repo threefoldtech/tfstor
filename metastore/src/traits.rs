@@ -51,6 +51,8 @@ pub trait BaseMetaTree: Send + Sync {
     /// # Returns
     /// * `usize` - The number of entries
     fn len(&self) -> usize;
+
+    fn is_empty(&self) -> Result<bool, MetaError>;
 }
 
 /// Type alias for a boxed iterator over key-value pairs.
