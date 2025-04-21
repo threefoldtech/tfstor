@@ -604,16 +604,22 @@ impl CommandHandler {
         let start_after = cursor.map(|c| c.into_bytes());
 
         // Use the scan method to get keys starting after the cursor
-        match self.namespace.scan(start_after) {
+        match self.namespace.scan(start_after, 10) {
             Ok(keys) => {
                 if keys.is_empty() {
                     // If no keys were found, return 0 as cursor and empty array
                     let response = vec![Frame::BulkString("0".into()), Frame::Array(vec![])];
                     Frame::Array(response)
                 } else {
-                    // Use the last key as the next cursor
-                    let last_key = keys.last().unwrap();
-                    let next_cursor = String::from_utf8_lossy(last_key).to_string();
+                    // Determine the next cursor
+                    // If we got fewer than 10 keys, we've reached the end
+                    let next_cursor = if keys.len() < 10 {
+                        "0".to_string()
+                    } else {
+                        // Otherwise, use the last key as the next cursor
+                        let last_key = keys.last().unwrap();
+                        String::from_utf8_lossy(last_key).to_string()
+                    };
 
                     // Convert keys to frames
                     let key_frames: Vec<Frame> = keys.into_iter().map(Frame::BulkString).collect();
