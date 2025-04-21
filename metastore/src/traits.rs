@@ -65,9 +65,12 @@ pub type KeyValuePairs = Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>), Meta
 pub trait MetaTreeExt: BaseMetaTree {
     /// Iterates over all key-value pairs in the tree.
     ///
+    /// # Arguments
+    /// * `start_after` - Optional key to start iteration after (exclusive)
+    ///
     /// # Returns
     /// * `KeyValuePairs` - A boxed iterator over all key-value pairs
-    fn iter_all(&self) -> KeyValuePairs;
+    fn iter_kv(&self, start_after: Option<Vec<u8>>) -> KeyValuePairs;
 
     /// Filters and iterates over a range of keys with optional filtering parameters.
     ///

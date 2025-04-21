@@ -90,8 +90,8 @@ impl Storage {
         // Get the all buckets tree which contains namespace metadata
         let bucketlist_tree = self.store.get_bucketlist_tree()?;
 
-        // Use tree.iter_all to iterate over all key-value pairs in the tree
-        let kv_pairs = bucketlist_tree.iter_all();
+        // Use tree.iter_kv to iterate over all key-value pairs in the tree
+        let kv_pairs = bucketlist_tree.iter_kv(None);
 
         // Transform the iterator to yield NamespaceMeta structs
         let namespace_iter = kv_pairs.map(|kv_result| {
