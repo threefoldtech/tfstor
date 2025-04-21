@@ -243,10 +243,10 @@ impl BaseMetaTree for FjallTree {
 }
 
 impl MetaTreeExt for FjallTree {
-    fn iter_all(&self) -> KeyValuePairs {
+    fn iter_kv(&self, start_after: Option<Vec<u8>>) -> KeyValuePairs {
         let partition = self.partition.clone();
         let keyspace = self.keyspace.clone();
-        let mut last_key: Option<Vec<u8>> = None;
+        let mut last_key = start_after;
 
         Box::new(std::iter::from_fn(move || {
             let read_tx = keyspace.read_tx();

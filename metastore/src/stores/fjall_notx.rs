@@ -193,9 +193,9 @@ impl BaseMetaTree for FjallTreeNotx {
 }
 
 impl MetaTreeExt for FjallTreeNotx {
-    fn iter_all(&self) -> KeyValuePairs {
+    fn iter_kv(&self, start_after: Option<Vec<u8>>) -> KeyValuePairs {
         let partition = self.partition.clone();
-        let mut last_key: Option<Vec<u8>> = None;
+        let mut last_key = start_after;
 
         Box::new(std::iter::from_fn(move || {
             let range = match &last_key {
@@ -237,6 +237,8 @@ impl MetaTreeExt for FjallTreeNotx {
         prefix: Option<String>,
         continuation_token: Option<String>,
     ) -> Box<(dyn Iterator<Item = (String, Object)> + 'a)> {
+        // we only use one of token or start_after
+        // we can ignore the other
         let mut ctsa = match (continuation_token, start_after) {
             (Some(token), Some(start)) => Some(std::cmp::max(token, start)),
             (Some(token), None) => Some(token),
@@ -245,19 +247,27 @@ impl MetaTreeExt for FjallTreeNotx {
 
         let partition = self.partition.clone();
 
+        // create the iterator based on the existence of the prefix and ctsa
         let base_iter: Box<
             dyn Iterator<Item = Result<(fjall::Slice, fjall::Slice), fjall::Error>>,
         > = match (prefix.as_ref(), ctsa.as_ref()) {
+            // if ctsa is after prefix and doesn't have prefix, return empty iterator
             (Some(prefix), Some(ctsa)) if (ctsa > prefix && !ctsa.starts_with(prefix)) => {
                 //Return empty iterator if ctsa is after prefix
                 Box::new(std::iter::empty())
             }
+
+            // if ctsa is before prefix, ignore ctsa
             (Some(prefix), Some(ctsa_local)) if ctsa_local < prefix => {
                 // If ctsa is before prefix, ignore ctsa
                 ctsa = None;
                 Box::new(partition.prefix(prefix.as_bytes()))
             }
+
+            // if prefix exists, with or without ctsa, use `prefix`
             (Some(prefix), _) => Box::new(partition.prefix(prefix.as_bytes())),
+
+            // if ctsa exists, without prefix, use `range` from ctsa
             (None, Some(ctsa)) => {
                 let mut next_key = ctsa.as_bytes().to_vec();
                 next_key.push(0);
@@ -266,8 +276,10 @@ impl MetaTreeExt for FjallTreeNotx {
             (None, None) => Box::new(partition.range::<Vec<u8>, _>(..)),
         };
 
+        // filter out errors
         let filtered = base_iter.filter_map(|res| res.ok());
 
+        //  if both prefix and ctsa exists, skip keys before ctsa
         let skip_filtered = if prefix.is_some() && ctsa.is_some() {
             let ctsa_bytes = ctsa.unwrap().into_bytes();
             Box::new(
@@ -277,6 +289,7 @@ impl MetaTreeExt for FjallTreeNotx {
             Box::new(filtered)
         };
 
+        // convert raw keys and values to strings and objects
         Box::new(skip_filtered.map(|(raw_key, raw_value)| {
             let key = unsafe { String::from_utf8_unchecked(raw_key.to_vec()) };
             let obj = Object::try_from(&*raw_value).unwrap();
