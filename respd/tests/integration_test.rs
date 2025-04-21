@@ -705,4 +705,102 @@ mod test_config {
             "Updated timestamp should be greater than or equal to the initial timestamp"
         );
     }
+
+    #[test]
+    fn test_scan_command() {
+        // Create a server
+        let server = TestServer::new();
+        let mut conn = server.connect();
+
+        // Create a set of keys for testing
+        let num_keys = 15; // More than the 10 keys returned per scan
+        let key_prefix = "scan_test_key_";
+
+        // Insert test keys
+        for i in 0..num_keys {
+            let key = format!("{}{}", key_prefix, i);
+            let value = format!("value_{}", i);
+            let _: () = redis::cmd("SET")
+                .arg(&key)
+                .arg(&value)
+                .query(&mut conn)
+                .expect(&format!("Failed to set key {}", key));
+        }
+
+        // Test 1: Initial scan with cursor 0
+        let scan_result: (String, Vec<String>) = redis::cmd("SCAN")
+            .arg("0")
+            .query(&mut conn)
+            .expect("Failed to execute SCAN command");
+
+        // Check that we got some keys and a non-zero cursor
+        let (cursor, keys) = scan_result;
+        assert!(
+            !cursor.is_empty() && cursor != "0",
+            "Expected non-zero cursor"
+        );
+        assert!(!keys.is_empty(), "Expected some keys in the first scan");
+        assert!(
+            keys.len() <= 10,
+            "Expected at most 10 keys in a single scan"
+        );
+
+        // All keys in the database are from our test
+
+        // Test 2: Continue scanning with the returned cursor
+        let scan_result2: (String, Vec<String>) = redis::cmd("SCAN")
+            .arg(&cursor)
+            .query(&mut conn)
+            .expect("Failed to execute second SCAN command");
+
+        let (cursor2, keys2) = scan_result2;
+
+        // Check that we got more keys (or a terminal cursor)
+        if keys2.is_empty() {
+            // If no more keys, cursor should be 0
+            assert_eq!(cursor2, "0", "Expected cursor 0 when no more keys");
+        } else {
+            // If we got more keys, verify they're different from the first batch
+
+            // Keys from second scan should be different from first scan
+            for key in &keys2 {
+                assert!(
+                    !keys.contains(key),
+                    "Keys should not be duplicated between scans"
+                );
+            }
+        }
+
+        // Test 3: Complete scan to get all keys
+        let mut all_keys = Vec::new();
+        let mut next_cursor = "0".to_string();
+
+        loop {
+            let scan_result: (String, Vec<String>) = redis::cmd("SCAN")
+                .arg(&next_cursor)
+                .query(&mut conn)
+                .expect("Failed to execute SCAN in loop");
+
+            let (cursor, mut batch_keys) = scan_result;
+            all_keys.append(&mut batch_keys);
+
+            if cursor == "0" {
+                break;
+            }
+            next_cursor = cursor;
+        }
+
+        // Verify we got all our test keys
+        assert_eq!(all_keys.len(), num_keys, "Should have found all test keys");
+
+        // Verify each expected key is in the results
+        for i in 0..num_keys {
+            let expected_key = format!("{}{}", key_prefix, i);
+            assert!(
+                all_keys.contains(&expected_key),
+                "Missing expected key: {}",
+                expected_key
+            );
+        }
+    }
 }
