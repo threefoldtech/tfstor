@@ -184,6 +184,12 @@ impl BaseMetaTree for FjallTreeNotx {
     fn len(&self) -> usize {
         self.partition.approximate_len()
     }
+
+    fn is_empty(&self) -> Result<bool, MetaError> {
+        self.partition
+            .is_empty()
+            .map_err(|e| MetaError::OtherDBError(e.to_string()))
+    }
 }
 
 impl MetaTreeExt for FjallTreeNotx {

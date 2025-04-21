@@ -600,10 +600,8 @@ mod tests {
     }
 
     impl MockFs {
-        fn new() -> Self {
-            Self {
-                should_fail_write: false,
-            }
+        fn new(should_fail_write: bool) -> Self {
+            Self { should_fail_write }
         }
     }
 
@@ -614,7 +612,7 @@ mod tests {
         }
 
         async fn write(&self, _path: &std::path::Path, _contents: &[u8]) -> std::io::Result<()> {
-            if !self.should_fail_write {
+            if self.should_fail_write {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "Mock write failure",
@@ -627,9 +625,9 @@ mod tests {
 
     impl CasFS {
         #[cfg(test)]
-        fn with_mock_fs(mut self) -> (Self, MockFs) {
+        fn with_mock_fs(mut self, write_failed: bool) -> (Self, MockFs) {
             // Changed return type
-            let mock_fs = MockFs::new();
+            let mock_fs = MockFs::new(write_failed);
             self.async_fs = Box::new(mock_fs.clone()); // Implement Clone for MockFs
             (self, mock_fs)
         }
@@ -647,7 +645,7 @@ mod tests {
     #[tokio::test]
     async fn test_store_object_write_failure() {
         for engine in TEST_ENGINES {
-            let (fs, _dir) = setup_test_fs(engine).0.with_mock_fs();
+            let (fs, _dir) = setup_test_fs(engine).0.with_mock_fs(true);
             do_test_store_object_write_failure(fs).await;
         }
     }
@@ -671,7 +669,7 @@ mod tests {
         // Verify no blocks were stored in metadata
         // the block must be rolled back
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        assert_eq!(block_tree.len().unwrap(), 0);
+        assert_eq!(block_tree.is_empty().unwrap(), true);
 
         // Verify object metadata was not created
         assert!(!fs.key_exists(bucket_name, key).unwrap());
@@ -711,7 +709,7 @@ mod tests {
 
         // Verify block & path was stored
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        assert!(block_tree.len().unwrap() > 0);
+        assert!(block_tree.len() > 0);
         let stored_block = block_tree.get_block(&obj.blocks()[0]).unwrap().unwrap();
         assert_eq!(stored_block.size(), test_data_len);
         assert_eq!(stored_block.rc(), 1);

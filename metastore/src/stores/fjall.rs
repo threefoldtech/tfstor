@@ -236,6 +236,10 @@ impl BaseMetaTree for FjallTree {
     fn len(&self) -> usize {
         self.partition.approximate_len()
     }
+
+    fn is_empty(&self) -> Result<bool, MetaError> {
+        Ok(self.len() == 0)
+    }
 }
 
 impl MetaTreeExt for FjallTree {
