@@ -38,6 +38,7 @@ pub enum Command {
     NSInfo { name: String },
     NSList,
     Auth { password: String },
+    DBSize,
     // Add more commands as needed
 }
 
@@ -291,6 +292,12 @@ impl Command {
                         };
                         Ok(Command::Auth { password })
                     }
+                    "DBSIZE" => {
+                        if array.len() != 1 {
+                            return Err(CommandError::WrongNumberOfArguments("DBSIZE".to_string()));
+                        }
+                        Ok(Command::DBSize)
+                    }
                     _ => Err(CommandError::UnknownCommand(command_name)),
                 }
             }
@@ -338,6 +345,7 @@ impl CommandHandler {
             Command::NSNew { name } => self.handle_nsnew(name).await,
             Command::NSInfo { name } => self.handle_nsinfo(name).await,
             Command::NSList => self.handle_nslist().await,
+            Command::DBSize => self.handle_dbsize(),
             Command::Select { .. } => {
                 // SELECT is handled at a higher level in the connection handler
                 Frame::Error("ERR SELECT should be handled at connection level".into())
@@ -549,5 +557,13 @@ impl CommandHandler {
                 Frame::Error(format!("ERR {}", e))
             }
         }
+    }
+
+    /// Handle DBSIZE command - get the number of keys in the current namespace
+    fn handle_dbsize(&self) -> Frame {
+        debug!("Handling DBSIZE command");
+        // Use the num_keys method to get an approximation of the number of keys
+        let count = self.namespace.num_keys();
+        Frame::Integer(count as i64)
     }
 }
