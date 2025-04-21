@@ -35,6 +35,7 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | NSINFO <n>     | Show info about a namespace              | `NSINFO mynamespace`               |
 | NSLIST           | List all available namespaces            | `NSLIST`                           |
 | DBSIZE           | Get the number of keys in the current namespace (approximate) | `DBSIZE`                          |
+| SCAN [cursor]     | Incrementally iterate over keys in the current namespace | `SCAN 0` or `SCAN mycursor`        |
 
 - All commands are case-insensitive.
 - Namespace commands (`SELECT`, `NSNEW`, `NSINFO`, `NSLIST`) allow multi-tenant data separation.

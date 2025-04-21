@@ -39,6 +39,7 @@ pub enum Command {
     NSList,
     Auth { password: String },
     DBSize,
+    Scan { cursor: Option<String> },
     // Add more commands as needed
 }
 
@@ -298,6 +299,33 @@ impl Command {
                         }
                         Ok(Command::DBSize)
                     }
+                    "SCAN" => {
+                        if array.len() > 2 {
+                            return Err(CommandError::WrongNumberOfArguments("SCAN".to_string()));
+                        }
+
+                        let cursor = if array.len() == 2 {
+                            match &array[1] {
+                                Frame::BulkString(bytes) => {
+                                    let cursor_str = String::from_utf8_lossy(bytes).to_string();
+                                    if cursor_str == "0" {
+                                        None
+                                    } else {
+                                        Some(cursor_str)
+                                    }
+                                }
+                                _ => {
+                                    return Err(CommandError::Protocol(
+                                        "SCAN cursor must be a bulk string".to_string(),
+                                    ))
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        Ok(Command::Scan { cursor })
+                    }
                     _ => Err(CommandError::UnknownCommand(command_name)),
                 }
             }
@@ -346,6 +374,7 @@ impl CommandHandler {
             Command::NSInfo { name } => self.handle_nsinfo(name).await,
             Command::NSList => self.handle_nslist().await,
             Command::DBSize => self.handle_dbsize(),
+            Command::Scan { cursor } => self.handle_scan(cursor).await,
             Command::Select { .. } => {
                 // SELECT is handled at a higher level in the connection handler
                 Frame::Error("ERR SELECT should be handled at connection level".into())
@@ -565,5 +594,43 @@ impl CommandHandler {
         // Use the num_keys method to get an approximation of the number of keys
         let count = self.namespace.num_keys();
         Frame::Integer(count as i64)
+    }
+
+    /// Handle SCAN command - scan keys in the current namespace
+    async fn handle_scan(&self, cursor: Option<String>) -> Frame {
+        debug!("Handling SCAN command with cursor: {:?}", cursor);
+
+        // Convert the cursor from String to Vec<u8> if it exists
+        let start_after = cursor.map(|c| c.into_bytes());
+
+        // Use the scan method to get keys starting after the cursor
+        match self.namespace.scan(start_after) {
+            Ok(keys) => {
+                if keys.is_empty() {
+                    // If no keys were found, return 0 as cursor and empty array
+                    let response = vec![Frame::BulkString("0".into()), Frame::Array(vec![])];
+                    Frame::Array(response)
+                } else {
+                    // Use the last key as the next cursor
+                    let last_key = keys.last().unwrap();
+                    let next_cursor = String::from_utf8_lossy(last_key).to_string();
+
+                    // Convert keys to frames
+                    let key_frames: Vec<Frame> =
+                        keys.into_iter().map(|k| Frame::BulkString(k)).collect();
+
+                    // Return [cursor, [keys...]]
+                    let response = vec![
+                        Frame::BulkString(next_cursor.into_bytes()),
+                        Frame::Array(key_frames),
+                    ];
+                    Frame::Array(response)
+                }
+            }
+            Err(e) => {
+                error!("Error scanning keys: {}", e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
     }
 }

@@ -6,7 +6,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use metastore::{BaseMetaTree, Durability, FjallStore, MetaError, MetaStore};
+use metastore::{Durability, FjallStore, MetaError, MetaStore, MetaTreeExt};
 
 // Default tree name for key-value storage
 // No longer using a default tree name as we'll use the namespace as the tree name
@@ -43,7 +43,10 @@ impl Storage {
     }
 
     /// Get a namespace instance for a specific namespace name
-    pub fn get_namespace(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, StorageError> {
+    pub fn get_namespace(
+        &self,
+        name: &str,
+    ) -> Result<Box<dyn MetaTreeExt + Send + Sync>, StorageError> {
         if !self.store.bucket_exists(name)? {
             return Err(StorageError::NamespaceNotFound);
         }
@@ -51,7 +54,7 @@ impl Storage {
         // TODO: get namespace meta
 
         self.store
-            .get_tree(name)
+            .get_bucket_ext(name)
             .map_err(|e| StorageError::MetaError(e.to_string()))
     }
 
@@ -70,7 +73,10 @@ impl Storage {
         }
     }
 
-    pub fn create_namespace(&self, name: &str) -> Result<Box<dyn BaseMetaTree>, StorageError> {
+    pub fn create_namespace(
+        &self,
+        name: &str,
+    ) -> Result<Box<dyn MetaTreeExt + Send + Sync>, StorageError> {
         if self.store.bucket_exists(name)? {
             return Err(StorageError::NamespaceNotFound);
         }

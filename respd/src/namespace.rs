@@ -5,12 +5,12 @@ use bytes::Bytes;
 use md5::{Digest, Md5};
 
 use crate::storage::{Storage, StorageError};
-use metastore::{BaseMetaTree, MetaError, Object, ObjectData};
+use metastore::{MetaError, MetaTreeExt, Object, ObjectData};
 
 /// Represents a namespace with its associated tree
 pub struct Namespace {
     /// The tree for this namespace
-    pub tree: Box<dyn BaseMetaTree>,
+    pub tree: Box<dyn MetaTreeExt + Send + Sync>,
 }
 
 impl Namespace {
@@ -112,5 +112,25 @@ impl Namespace {
 
     pub fn num_keys(&self) -> usize {
         self.tree.len()
+    }
+
+    pub fn scan(&self, start_after: Option<Vec<u8>>) -> Result<Vec<Vec<u8>>, MetaError> {
+        let mut keys = Vec::new();
+        let mut count = 0;
+
+        for result in self.tree.iter_kv(start_after) {
+            match result {
+                Ok((key, _)) => {
+                    keys.push(key);
+                    count += 1;
+                    if count >= 10 {
+                        break;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(keys)
     }
 }
