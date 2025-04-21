@@ -25,10 +25,6 @@ struct Opt {
     #[clap(long, default_value = "127.0.0.1")]
     host: String,
 
-    /// Size limit for inlined metadata in bytes
-    #[clap(long)]
-    inlined_metadata_size: Option<usize>,
-
     /// Admin password for authentication
     /// If not provided, all connections are automatically granted admin privileges
     #[clap(long)]
@@ -44,7 +40,6 @@ async fn main() -> Result<()> {
     let opt = Opt::parse();
 
     info!("Data directory: {:?}", opt.data_dir);
-    info!("Inlined metadata size: {:?}", opt.inlined_metadata_size);
 
     // Create data directory if it doesn't exist
     if !opt.data_dir.exists() {
@@ -52,7 +47,8 @@ async fn main() -> Result<()> {
     }
 
     // Initialize storage
-    let storage = storage::Storage::new(opt.data_dir.clone(), opt.inlined_metadata_size);
+    // set the inlined metadata size to 1byte effectily enabling it for all keys
+    let storage = storage::Storage::new(opt.data_dir.clone(), Some(1));
 
     // Start server
     info!("Starting respd server on {}:{}", opt.host, opt.port);
