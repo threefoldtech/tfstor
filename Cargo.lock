@@ -656,6 +656,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "byteview"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6236364b88b9b6d0bc181ba374cf1ab55ba3ef97a1cb6f8cddad48a273767fb5"
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -792,6 +798,12 @@ dependencies = [
  "bytes",
  "memchr",
 ]
+
+[[package]]
+name = "compare"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea0095f6103c2a8b44acd6fd15960c801dafebf02e21940360833e0673f48ba7"
 
 [[package]]
 name = "concurrent-queue"
@@ -1271,11 +1283,12 @@ dependencies = [
 
 [[package]]
 name = "fjall"
-version = "2.5.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80910a26e4fb5e5393ff64d293602ac1ade56cf4d14d244c02a7d4ddcd5f10bc"
+checksum = "958511f67d1f80e6bff9ffac05c626bb340d4602ca6ea5617d9901c218c894f0"
 dependencies = [
  "byteorder",
+ "byteview",
  "dashmap",
  "log",
  "lsm-tree",
@@ -1969,6 +1982,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "interval-heap"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11274e5e8e89b8607cfedc2910b6626e998779b48a019151c7604d0adcb86ac6"
+dependencies = [
+ "compare",
+]
+
+[[package]]
 name = "is-terminal"
 version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2071,15 +2093,16 @@ dependencies = [
 
 [[package]]
 name = "lsm-tree"
-version = "2.5.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d858efa63a32a286a06aa3968f3ed09811d556697e9f9804aa72ea679ed3b83"
+checksum = "87d58bdef2dcbf50fce9f343265bdbd7fb08a458d241eb837ce426be22d674b4"
 dependencies = [
  "byteorder",
  "crossbeam-skiplist",
  "double-ended-peekable",
  "enum_dispatch",
  "guardian",
+ "interval-heap",
  "log",
  "lz4_flex",
  "path-absolutize",
@@ -2158,12 +2181,6 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
-
-[[package]]
-name = "min-max-heap"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2687e6cf9c00f48e9284cf9fd15f2ef341d03cc7743abf9df4c5f07fdee50b18"
 
 [[package]]
 name = "minimal-lexical"
@@ -3775,17 +3792,18 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "value-log"
-version = "1.4.1"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f90495556d09c3026f7f3897f8a7db59c8c701082e32dcf58c2319062ae1eb0"
+checksum = "62fc7c4ce161f049607ecea654dca3f2d727da5371ae85e2e4f14ce2b98ed67c"
 dependencies = [
  "byteorder",
+ "byteview",
+ "interval-heap",
  "log",
- "min-max-heap",
  "path-absolutize",
- "quick_cache",
  "rustc-hash",
  "tempfile",
+ "varint-rs",
  "xxhash-rust",
 ]
 

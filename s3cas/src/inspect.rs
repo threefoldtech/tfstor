@@ -4,7 +4,11 @@ use std::path::PathBuf;
 use crate::cas::StorageEngine;
 use metastore::{FjallStore, FjallStoreNotx, MetaStore};
 
-pub fn num_keys(meta_root: PathBuf, storage_engine: StorageEngine) -> Result<usize> {
+pub fn num_keys(
+    meta_root: PathBuf,
+    storage_engine: StorageEngine,
+    bucket_name: &str,
+) -> Result<usize> {
     let meta_store = match storage_engine {
         StorageEngine::Fjall => {
             let store = FjallStore::new(meta_root, None, None);
@@ -16,7 +20,7 @@ pub fn num_keys(meta_root: PathBuf, storage_engine: StorageEngine) -> Result<usi
         }
     };
 
-    let bucket_keys = meta_store.num_keys();
+    let bucket_keys = meta_store.num_keys(bucket_name)?;
     Ok(bucket_keys)
 }
 

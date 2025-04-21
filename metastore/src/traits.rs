@@ -49,8 +49,8 @@ pub trait BaseMetaTree: Send + Sync {
     /// Returns the number of key-value pairs in the tree.
     ///
     /// # Returns
-    /// * `Result<usize, MetaError>` - The number of entries or an error
-    fn len(&self) -> Result<usize, MetaError>;
+    /// * `usize` - The number of entries
+    fn len(&self) -> usize;
 }
 
 /// Type alias for a boxed iterator over key-value pairs.
@@ -130,15 +130,6 @@ pub trait Store: Send + Sync + Debug + 'static {
     /// # Returns
     /// * `Transaction` - A new transaction object
     fn begin_transaction(&self) -> Transaction;
-
-    /// Returns the number of keys in the specified tree.
-    ///
-    /// # Arguments
-    /// * `tree_name` - The name of the tree to count keys in
-    ///
-    /// # Returns
-    /// * `Result<usize, MetaError>` - The number of keys or an error
-    fn num_keys(&self, tree_name: &str) -> Result<usize, MetaError>;
 
     /// Returns the total disk space used by the storage.
     ///

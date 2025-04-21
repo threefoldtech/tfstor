@@ -76,11 +76,6 @@ impl Store for FjallStoreNotx {
         Transaction::new(Box::new(FjallNoTransaction::new(Arc::new(self.clone()))))
     }
 
-    fn num_keys(&self, tree_name: &str) -> Result<usize, MetaError> {
-        let partition = self.get_partition(tree_name)?;
-        Ok(partition.approximate_len())
-    }
-
     fn disk_space(&self) -> u64 {
         self.keyspace.disk_space()
     }
@@ -186,12 +181,8 @@ impl BaseMetaTree for FjallTreeNotx {
         }
     }
 
-    fn len(&self) -> Result<usize, MetaError> {
-        let len = self
-            .partition
-            .len()
-            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
-        Ok(len)
+    fn len(&self) -> usize {
+        self.partition.approximate_len()
     }
 }
 
