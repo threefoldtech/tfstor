@@ -109,4 +109,8 @@ impl Namespace {
             None => Ok(None),
         }
     }
+
+    pub fn num_keys(&self) -> usize {
+        self.tree.len()
+    }
 }

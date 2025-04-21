@@ -669,7 +669,7 @@ mod tests {
         // Verify no blocks were stored in metadata
         // the block must be rolled back
         let block_tree = fs.meta_store.get_block_tree().unwrap();
-        assert_eq!(block_tree.is_empty().unwrap(), true);
+        assert_eq!(block_tree.is_empty(), true);
 
         // Verify object metadata was not created
         assert!(!fs.key_exists(bucket_name, key).unwrap());
