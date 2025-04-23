@@ -18,6 +18,8 @@ pub struct NamespaceProperties {
     pub namespace_name: String,
     /// Write Once Read Many mode - if true, keys can only be written once and never modified or deleted
     pub worm: bool,
+    /// Locked mode - if true, no set or delete operations are allowed
+    pub locked: bool,
 }
 
 impl Default for NamespaceProperties {
@@ -25,6 +27,7 @@ impl Default for NamespaceProperties {
         Self {
             namespace_name: "default".to_string(),
             worm: false,
+            locked: false,
         }
     }
 }
@@ -188,6 +191,19 @@ impl Namespace {
                 }
                 Ok(())
             }
+            "lock" => {
+                match value {
+                    "1" => props.locked = true,
+                    "0" => props.locked = false,
+                    _ => {
+                        return Err(MetaError::OtherDBError(format!(
+                            "Invalid value for lock property: {}",
+                            value
+                        )))
+                    }
+                }
+                Ok(())
+            }
             _ => Err(MetaError::OtherDBError(format!(
                 "Unknown property: {}",
                 property
@@ -204,6 +220,7 @@ impl Namespace {
     ) -> Result<(), MetaError> {
         let mut props = self.properties.write().unwrap();
         props.worm = meta.worm;
+        props.locked = meta.locked;
         Ok(())
     }
 
@@ -217,6 +234,11 @@ impl Namespace {
             } else {
                 "0".to_string()
             }),
+            "lock" => Ok(if props.locked {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }),
             _ => Err(MetaError::OtherDBError(format!(
                 "Unknown property: {}",
                 property
@@ -225,9 +247,18 @@ impl Namespace {
     }
 
     pub fn set(&self, key: &[u8], value: Bytes) -> Result<()> {
+        // Read namespace properties
+        let props = self.properties.read().unwrap();
+
+        // Check if namespace is locked
+        if props.locked {
+            return Err(anyhow::anyhow!(
+                "ERR: Namespace is temporarily locked (read-only)"
+            ));
+        }
+
         // Check if namespace is in WORM mode and key already exists
-        let worm_enabled = self.properties.read().unwrap().worm;
-        if worm_enabled {
+        if props.worm {
             // In WORM mode, check if key already exists
             if self.exists(key)? {
                 return Err(anyhow::anyhow!("ERR: Namespace is protected by worm mode"));
@@ -270,9 +301,18 @@ impl Namespace {
     }
 
     pub fn del(&self, key: &[u8]) -> Result<()> {
+        // Read namespace properties
+        let props = self.properties.read().unwrap();
+
+        // Check if namespace is locked
+        if props.locked {
+            return Err(anyhow::anyhow!(
+                "ERR: Namespace is temporarily locked (read-only)"
+            ));
+        }
+
         // Check if namespace is in WORM mode
-        let worm_enabled = self.properties.read().unwrap().worm;
-        if worm_enabled {
+        if props.worm {
             return Err(anyhow::anyhow!(
                 "ERR: Cannot delete a key when namespace is in worm mode"
             ));

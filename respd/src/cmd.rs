@@ -695,11 +695,22 @@ impl CommandHandler {
                             ))
                         }
                     },
+                    "lock" => match value.as_str() {
+                        "1" => meta.locked = true,
+                        "0" => meta.locked = false,
+                        _ => {
+                            return Frame::Error(format!(
+                                "ERR Invalid value for lock property: {}",
+                                value
+                            ))
+                        }
+                    },
                     _ => return Frame::Error(format!("ERR Unknown property: {}", property)),
                 }
 
-                // Store the property value before moving meta
+                // Store the property values before moving meta
                 let worm_value = meta.worm;
+                let locked_value = meta.locked;
 
                 // Persist the updated metadata
                 match self.storage.update_namespace_meta(&namespace, meta) {
@@ -711,6 +722,7 @@ impl CommandHandler {
                             let mut props = ns.properties.write().unwrap();
                             match property.to_lowercase().as_str() {
                                 "worm" => props.worm = worm_value,
+                                "lock" => props.locked = locked_value,
                                 _ => {} // Should never happen due to earlier check
                             }
                             debug!(
