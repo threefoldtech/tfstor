@@ -342,7 +342,7 @@ pub struct CommandHandler {
     storage: Arc<Storage>,
 
     // Namespace for this connection
-    namespace: Namespace,
+    namespace: Arc<Namespace>,
 
     // Flag indicating if this connection has admin privileges
     is_admin: bool,
@@ -350,7 +350,7 @@ pub struct CommandHandler {
 
 impl CommandHandler {
     /// Create a new command handler
-    pub fn new(storage: Arc<Storage>, namespace: Namespace, is_admin: bool) -> Self {
+    pub fn new(storage: Arc<Storage>, namespace: Arc<Namespace>, is_admin: bool) -> Self {
         Self {
             storage,
             namespace,
