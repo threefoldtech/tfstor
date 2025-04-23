@@ -225,6 +225,16 @@ impl Namespace {
     }
 
     pub fn set(&self, key: &[u8], value: Bytes) -> Result<()> {
+        // Check if namespace is in WORM mode and key already exists
+        let worm_enabled = self.properties.read().unwrap().worm;
+        if worm_enabled {
+            // In WORM mode, check if key already exists
+            if self.exists(key)? {
+                return Err(anyhow::anyhow!("Namespace is protected by worm mode"));
+            }
+        }
+
+        // Proceed with setting the key
         let data = value.to_vec();
         let hash = Md5::digest(&data).into();
         let size = data.len() as u64;
@@ -260,6 +270,15 @@ impl Namespace {
     }
 
     pub fn del(&self, key: &[u8]) -> Result<()> {
+        // Check if namespace is in WORM mode
+        let worm_enabled = self.properties.read().unwrap().worm;
+        if worm_enabled {
+            return Err(anyhow::anyhow!(
+                "Cannot delete a key when namespace is in worm mode"
+            ));
+        }
+
+        // Proceed with deleting the key
         self.tree.remove(key)?;
         Ok(())
     }
