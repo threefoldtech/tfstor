@@ -13,7 +13,7 @@ use metastore::{MetaError, MetaTreeExt, Object, ObjectData};
 /// Represents a namespace with its associated tree
 pub struct Namespace {
     /// The tree for this namespace
-    pub tree: Arc<Box<dyn MetaTreeExt + Send + Sync>>,
+    pub tree: Arc<dyn MetaTreeExt + Send + Sync>,
 }
 
 /// A cache for namespace instances to allow sharing between clients
@@ -31,7 +31,7 @@ impl NamespaceCache {
         }
     }
 
-    /// Get a namespace from the cache or create a new one if it doesn't exist
+    /// Get a namespace from the cache or existing storage
     pub fn get_or_create(&self, name: String) -> Result<Arc<Namespace>, StorageError> {
         // First, try to get from cache
         {
@@ -42,11 +42,16 @@ impl NamespaceCache {
             }
         }
 
-        // Not in cache, create a new one
-        debug!("Creating new namespace: {}", name);
+        // Not in cache, try to get from storage
         let tree = self.storage.get_namespace(name.as_str())?;
+
+        // Namespace exists in storage, create a new namespace object
+        debug!(
+            "Creating new namespace object for existing namespace: {}",
+            name
+        );
         let namespace = Arc::new(Namespace {
-            tree: Arc::new(tree),
+            tree: Arc::from(tree),
         });
 
         // Store in cache
@@ -63,11 +68,11 @@ impl NamespaceCache {
         match self.get_or_create(name.clone()) {
             Ok(namespace) => Ok(namespace),
             Err(_) => {
-                // Try to create the namespace
-                debug!("Creating new namespace that didn't exist: {}", name);
+                // Namespace doesn't exist in storage, create a new one
+                debug!("Creating new namespace in storage: {}", name);
                 let tree = self.storage.create_namespace(&name)?;
                 let namespace = Arc::new(Namespace {
-                    tree: Arc::new(tree),
+                    tree: Arc::from(tree),
                 });
 
                 // Store in cache
@@ -96,13 +101,13 @@ impl Namespace {
         let hash = Md5::digest(&data).into();
         let size = data.len() as u64;
         let obj_meta = Object::new(size, hash, ObjectData::Inline { data });
-        (**self.tree).insert(key, obj_meta.to_vec())?;
+        self.tree.insert(key, obj_meta.to_vec())?;
         Ok(())
     }
 
     /// Get an Object from the tree for a given key
     fn get_object(&self, key: &[u8]) -> Result<Option<Object>, MetaError> {
-        match (**self.tree).get(key)? {
+        match self.tree.get(key)? {
             Some(data) => {
                 let obj = Object::try_from(&*data).expect("Malformed object");
                 Ok(Some(obj))
@@ -127,12 +132,12 @@ impl Namespace {
     }
 
     pub fn del(&self, key: &[u8]) -> Result<()> {
-        (**self.tree).remove(key)?;
+        self.tree.remove(key)?;
         Ok(())
     }
 
     pub fn exists(&self, key: &[u8]) -> Result<bool, MetaError> {
-        (**self.tree).contains_key(key)
+        self.tree.contains_key(key)
     }
 
     /// Get the length (size) of a key's value
@@ -182,7 +187,7 @@ impl Namespace {
     }
 
     pub fn num_keys(&self) -> usize {
-        (**self.tree).len()
+        self.tree.len()
     }
 
     pub fn scan(
@@ -193,7 +198,7 @@ impl Namespace {
         let mut keys = Vec::new();
         let mut count = 0;
 
-        for result in (**self.tree).iter_kv(start_after) {
+        for result in self.tree.iter_kv(start_after) {
             match result {
                 Ok((key, _)) => {
                     keys.push(key);

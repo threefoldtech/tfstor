@@ -47,22 +47,22 @@ impl TestServer {
                 let addr = format!("127.0.0.1:{}", thread_port);
                 let listener = TcpListener::bind(&addr).expect("Failed to bind to address");
                 println!("Listening on: {}", addr);
-                
+
                 // Create a shared storage instance
                 let storage = Arc::new(respd::storage::Storage::new(thread_data_dir, None));
-                
+
                 // Create a shared namespace cache
                 let namespace_cache = Arc::new(respd::namespace::NamespaceCache::new(storage.clone()));
-                
+
                 // Convert to tokio TcpListener
                 let listener = tokio::net::TcpListener::from_std(listener).expect("Failed to convert listener");
-                
+
                 // Create a future that completes when shutdown signal is received
                 let shutdown_future = async {
                     let _ = shutdown_receiver.await;
                     println!("Shutdown signal received");
                 };
-                
+
                 // Accept connections until shutdown signal is received
                 tokio::select! {
                     _ = shutdown_future => {
@@ -73,16 +73,16 @@ impl TestServer {
                             match listener.accept().await {
                                 Ok((socket, addr)) => {
                                     println!("Accepted connection from: {}", addr);
-                                    
+
                                     // Clone the storage for this connection
                                     let storage = Arc::clone(&storage);
-                                    
+
                                     // Clone the namespace cache for this connection
                                     let namespace_cache = Arc::clone(&namespace_cache);
-                                    
+
                                     // Spawn a new task to handle this connection
                                     // Clone admin password for this connection
-                                    let admin_password = thread_admin_password.clone();     
+                                    let admin_password = thread_admin_password.clone();
                                     tokio::spawn(async move {
                                         // Pass admin_password to the process function
                                         if let Err(e) = respd::server::process(socket, storage, namespace_cache, admin_password).await {
