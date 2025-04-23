@@ -768,8 +768,8 @@ mod test_config {
         );
         if let Err(err) = modify_result {
             assert!(
-                err.to_string().contains("worm mode"),
-                "Error should mention WORM mode"
+                err.to_string().contains("ERR:") && err.to_string().contains("worm mode"),
+                "Error should mention ERR: prefix and WORM mode"
             );
         }
 
@@ -779,8 +779,8 @@ mod test_config {
         assert!(del_result.is_err(), "Deleting key in WORM mode should fail");
         if let Err(err) = del_result {
             assert!(
-                err.to_string().contains("worm mode"),
-                "Error should mention WORM mode"
+                err.to_string().contains("ERR:") && err.to_string().contains("worm mode"),
+                "Error should mention ERR: prefix and WORM mode"
             );
         }
 
