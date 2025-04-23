@@ -4,7 +4,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error};
 
-use crate::{namespace::Namespace, storage::Storage};
+use crate::namespace::{Namespace, NamespaceCache};
+use crate::storage::Storage;
 
 #[derive(Debug, Error)]
 pub enum CommandError {
@@ -24,22 +25,56 @@ pub enum CommandError {
 /// Redis command types supported by our server
 #[derive(Debug)]
 pub enum Command {
-    Get { key: String },
-    MGet { keys: Vec<String> },
-    Set { key: String, value: Bytes },
-    Ping { message: Option<String> },
-    Del { key: String },
-    Exists { key: String },
-    Check { key: String },
-    Length { key: String },
-    KeyTime { key: String },
-    Select { namespace: String },
-    NSNew { name: String },
-    NSInfo { name: String },
+    Get {
+        key: String,
+    },
+    MGet {
+        keys: Vec<String>,
+    },
+    Set {
+        key: String,
+        value: Bytes,
+    },
+    Ping {
+        message: Option<String>,
+    },
+    Del {
+        key: String,
+    },
+    Exists {
+        key: String,
+    },
+    Check {
+        key: String,
+    },
+    Length {
+        key: String,
+    },
+    KeyTime {
+        key: String,
+    },
+    Select {
+        namespace: String,
+    },
+    NSNew {
+        name: String,
+    },
+    NSInfo {
+        name: String,
+    },
     NSList,
-    Auth { password: String },
+    Auth {
+        password: String,
+    },
     DBSize,
-    Scan { cursor: Option<String> },
+    Scan {
+        cursor: Option<String>,
+    },
+    NSSet {
+        namespace: String,
+        property: String,
+        value: String,
+    },
     // Add more commands as needed
 }
 
@@ -142,6 +177,44 @@ impl Command {
                         }
 
                         Ok(Command::NSList)
+                    }
+                    "NSSET" => {
+                        if array.len() != 4 {
+                            return Err(CommandError::WrongNumberOfArguments("NSSET".to_string()));
+                        }
+
+                        let namespace = match &array[1] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "NSSET namespace must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        let property = match &array[2] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "NSSET property must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        let value = match &array[3] {
+                            Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                            _ => {
+                                return Err(CommandError::Protocol(
+                                    "NSSET value must be a bulk string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(Command::NSSet {
+                            namespace,
+                            property,
+                            value,
+                        })
                     }
                     "DEL" => {
                         if array.len() != 2 {
@@ -344,16 +417,25 @@ pub struct CommandHandler {
     // Namespace for this connection
     namespace: Arc<Namespace>,
 
+    // Namespace cache shared across all connections
+    namespace_cache: Arc<NamespaceCache>,
+
     // Flag indicating if this connection has admin privileges
     is_admin: bool,
 }
 
 impl CommandHandler {
     /// Create a new command handler
-    pub fn new(storage: Arc<Storage>, namespace: Arc<Namespace>, is_admin: bool) -> Self {
+    pub fn new(
+        storage: Arc<Storage>,
+        namespace: Arc<Namespace>,
+        namespace_cache: Arc<NamespaceCache>,
+        is_admin: bool,
+    ) -> Self {
         Self {
             storage,
             namespace,
+            namespace_cache,
             is_admin,
         }
     }
@@ -373,6 +455,11 @@ impl CommandHandler {
             Command::NSNew { name } => self.handle_nsnew(name).await,
             Command::NSInfo { name } => self.handle_nsinfo(name).await,
             Command::NSList => self.handle_nslist().await,
+            Command::NSSet {
+                namespace,
+                property,
+                value,
+            } => self.handle_nsset(namespace, property, value).await,
             Command::DBSize => self.handle_dbsize(),
             Command::Scan { cursor } => self.handle_scan(cursor).await,
             Command::Select { .. } => {
@@ -558,33 +645,97 @@ impl CommandHandler {
     async fn handle_nslist(&self) -> Frame {
         debug!("Handling NSLIST command");
 
-        // Use iter_namespace to get a stream of namespaces
-        match self.storage.iter_namespace() {
-            Ok(namespace_iter) => {
-                // Create an array to hold the namespace names
-                let mut namespaces = Vec::new();
+        // NSLIST is available to all users, no admin check required
 
-                // Process each namespace directly as we receive it
-                for result in namespace_iter {
-                    match result {
-                        Ok(meta) => {
-                            // Add just the namespace name to the array
-                            namespaces.push(Frame::BulkString(meta.name.into_bytes()));
-                        }
-                        Err(e) => {
-                            error!("Error processing namespace: {}", e);
-                            // Skip this namespace and continue with others
-                        }
+        // Get the list of namespaces
+        match self.storage.iter_namespace() {
+            Ok(namespaces) => {
+                let mut result = Vec::new();
+                for namespace in namespaces {
+                    match namespace {
+                        Ok(ns) => result.push(Frame::BulkString(ns.name.into_bytes())),
+                        Err(_) => continue, // Skip namespaces with errors
                     }
                 }
 
                 // Return the array of namespace names
-                Frame::Array(namespaces)
+                Frame::Array(result)
             }
             Err(e) => {
                 error!("Error listing namespaces: {}", e);
                 Frame::Error(format!("ERR {}", e))
             }
+        }
+    }
+
+    /// Handle NSSET command - set a property for a namespace
+    async fn handle_nsset(&self, namespace: String, property: String, value: String) -> Frame {
+        debug!(
+            "Handling NSSET command for namespace: {}, property: {}, value: {}",
+            namespace, property, value
+        );
+
+        // Check if user has admin privileges
+        if !self.is_admin {
+            return Frame::Error("ERR NSSET command requires admin privileges".into());
+        }
+
+        // Get the namespace metadata
+        match self.storage.get_namespace_meta(&namespace) {
+            Ok(mut meta) => {
+                // Update the property based on input
+                match property.to_lowercase().as_str() {
+                    "worm" => match value.as_str() {
+                        "1" => meta.worm = true,
+                        "0" => meta.worm = false,
+                        _ => {
+                            return Frame::Error(format!(
+                                "ERR Invalid value for worm property: {}",
+                                value
+                            ))
+                        }
+                    },
+                    _ => return Frame::Error(format!("ERR Unknown property: {}", property)),
+                }
+
+                // Store the property value before moving meta
+                let worm_value = meta.worm;
+
+                // Persist the updated metadata
+                match self.storage.update_namespace_meta(&namespace, meta) {
+                    Ok(_) => {
+                        // Use the shared namespace cache to update all instances of this namespace
+                        // This ensures that all clients using this namespace will see the updated properties
+                        self.namespace_cache.update_all_instances(&namespace, |ns| {
+                            // Update the in-memory properties to reflect the change
+                            let mut props = ns.properties.write().unwrap();
+                            match property.to_lowercase().as_str() {
+                                "worm" => props.worm = worm_value,
+                                _ => {} // Should never happen due to earlier check
+                            }
+                            debug!(
+                                "Updated namespace {} in cache with property {}: {}",
+                                namespace, property, worm_value
+                            );
+                        });
+
+                        debug!(
+                            "Using shared namespace cache to update all instances of namespace {}",
+                            namespace
+                        );
+
+                        // Note: We don't need to separately update self.namespace
+                        // because it should already be updated through the shared cache
+                        // if it's the same namespace
+
+                        Frame::SimpleString("OK".into())
+                    }
+                    Err(e) => {
+                        Frame::Error(format!("ERR Failed to update namespace metadata: {}", e))
+                    }
+                }
+            }
+            Err(e) => Frame::Error(format!("ERR Namespace not found: {}", e)),
         }
     }
 

@@ -10,10 +10,31 @@ use tracing::debug;
 use crate::storage::{Storage, StorageError};
 use metastore::{MetaError, MetaTreeExt, Object, ObjectData};
 
+/// Properties for a namespace
+#[derive(Debug, Clone)]
+pub struct NamespaceProperties {
+    /// Name of the namespace this properties belongs to
+    #[allow(dead_code)]
+    pub namespace_name: String,
+    /// Write Once Read Many mode - if true, keys can only be written once and never modified or deleted
+    pub worm: bool,
+}
+
+impl Default for NamespaceProperties {
+    fn default() -> Self {
+        Self {
+            namespace_name: "default".to_string(),
+            worm: false,
+        }
+    }
+}
+
 /// Represents a namespace with its associated tree
 pub struct Namespace {
     /// The tree for this namespace
     pub tree: Arc<dyn MetaTreeExt + Send + Sync>,
+    /// Properties for this namespace
+    pub properties: RwLock<NamespaceProperties>,
 }
 
 /// A cache for namespace instances to allow sharing between clients
@@ -50,9 +71,19 @@ impl NamespaceCache {
             "Creating new namespace object for existing namespace: {}",
             name
         );
+        let props = NamespaceProperties {
+            namespace_name: name.clone(),
+            ..Default::default()
+        };
         let namespace = Arc::new(Namespace {
             tree: Arc::from(tree),
+            properties: RwLock::new(props),
         });
+
+        // Sync properties with metadata
+        if let Ok(meta) = self.storage.get_namespace_meta(&name) {
+            let _ = namespace.sync_properties_from_meta(&meta);
+        }
 
         // Store in cache
         {
@@ -63,6 +94,37 @@ impl NamespaceCache {
         Ok(namespace)
     }
 
+    /// Get a namespace from the cache without creating it if it doesn't exist
+    #[allow(dead_code)]
+    pub fn get(&self, name: &str) -> Result<Arc<Namespace>, StorageError> {
+        // Try to get from cache
+        let namespaces = self.namespaces.read().unwrap();
+        if let Some(namespace) = namespaces.get(name) {
+            debug!("Using cached namespace: {}", name);
+            return Ok(namespace.clone());
+        }
+
+        // Not in cache
+        Err(StorageError::NamespaceNotFound)
+    }
+
+    /// Update all instances of a namespace in the cache
+    /// This ensures that all clients using this namespace will see the updated properties
+    pub fn update_all_instances<F>(&self, name: &str, update_fn: F)
+    where
+        F: Fn(&Arc<Namespace>),
+    {
+        // Get all instances from cache
+        let namespaces = self.namespaces.read().unwrap();
+        if let Some(namespace) = namespaces.get(name) {
+            // Apply the update function to the namespace
+            update_fn(namespace);
+            debug!("Updated namespace instance in cache: {}", name);
+        } else {
+            debug!("Namespace not found in cache, no update needed: {}", name);
+        }
+    }
+
     /// Create a namespace if it doesn't exist and return it
     pub fn create_if_not_exists(&self, name: String) -> Result<Arc<Namespace>, StorageError> {
         match self.get_or_create(name.clone()) {
@@ -71,9 +133,19 @@ impl NamespaceCache {
                 // Namespace doesn't exist in storage, create a new one
                 debug!("Creating new namespace in storage: {}", name);
                 let tree = self.storage.create_namespace(&name)?;
+                let props = NamespaceProperties {
+                    namespace_name: name.clone(),
+                    ..Default::default()
+                };
                 let namespace = Arc::new(Namespace {
                     tree: Arc::from(tree),
+                    properties: RwLock::new(props),
                 });
+
+                // Sync properties with metadata
+                if let Ok(meta) = self.storage.get_namespace_meta(&name) {
+                    let _ = namespace.sync_properties_from_meta(&meta);
+                }
 
                 // Store in cache
                 {
@@ -95,6 +167,62 @@ impl Namespace {
             tree: Arc::new(tree),
         })
     }*/
+
+    /// Set a property for this namespace
+    /// Note: This only updates the in-memory properties, not the persistent metadata
+    /// For persistent changes, use the NSSET command which updates both
+    #[allow(dead_code)]
+    pub fn set_property(&self, property: &str, value: &str) -> Result<(), MetaError> {
+        let mut props = self.properties.write().unwrap();
+        match property.to_lowercase().as_str() {
+            "worm" => {
+                match value {
+                    "1" => props.worm = true,
+                    "0" => props.worm = false,
+                    _ => {
+                        return Err(MetaError::OtherDBError(format!(
+                            "Invalid value for worm property: {}",
+                            value
+                        )))
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(MetaError::OtherDBError(format!(
+                "Unknown property: {}",
+                property
+            ))),
+        }
+    }
+
+    /// Sync properties with the persistent metadata
+    /// This is called when the namespace is loaded to ensure in-memory properties
+    /// reflect the persistent metadata
+    pub fn sync_properties_from_meta(
+        &self,
+        meta: &crate::storage::NamespaceMeta,
+    ) -> Result<(), MetaError> {
+        let mut props = self.properties.write().unwrap();
+        props.worm = meta.worm;
+        Ok(())
+    }
+
+    /// Get a property value as string
+    #[allow(dead_code)]
+    pub fn get_property(&self, property: &str) -> Result<String, MetaError> {
+        let props = self.properties.read().unwrap();
+        match property.to_lowercase().as_str() {
+            "worm" => Ok(if props.worm {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }),
+            _ => Err(MetaError::OtherDBError(format!(
+                "Unknown property: {}",
+                property
+            ))),
+        }
+    }
 
     pub fn set(&self, key: &[u8], value: Bytes) -> Result<()> {
         let data = value.to_vec();

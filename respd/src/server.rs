@@ -82,8 +82,13 @@ pub async fn process(
         }
     };
 
-    // Create a command handler with the connection's namespace and admin status
-    let mut handler = CommandHandler::new(storage.clone(), namespace, conn.is_admin());
+    // Create a command handler with the connection's namespace, namespace cache, and admin status
+    let mut handler = CommandHandler::new(
+        storage.clone(),
+        namespace,
+        namespace_cache.clone(),
+        conn.is_admin(),
+    );
 
     // Use BytesMut for zero-copy operations
     let mut buffer = BytesMut::with_capacity(4096);
@@ -112,6 +117,7 @@ pub async fn process(
                     pos += len;
 
                     // Process the frame
+                    // Select and Auth commands are special so we handle them separately here
                     let response = match Command::from_frame(frame) {
                         Ok(Command::Select { namespace }) => {
                             // Special handling for SELECT command to set the namespace
@@ -125,6 +131,7 @@ pub async fn process(
                                     handler = CommandHandler::new(
                                         storage.clone(),
                                         namespace,
+                                        namespace_cache.clone(),
                                         conn.is_admin(),
                                     );
                                     Frame::SimpleString("OK".into())
@@ -160,6 +167,7 @@ pub async fn process(
                                                 handler = CommandHandler::new(
                                                     storage.clone(),
                                                     namespace,
+                                                    namespace_cache.clone(),
                                                     conn.is_admin(),
                                                 );
                                                 Frame::SimpleString("OK".into())
