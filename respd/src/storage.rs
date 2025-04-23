@@ -62,6 +62,7 @@ impl Storage {
         if !self.store.bucket_exists(name)? {
             return Err(StorageError::NamespaceNotFound);
         }
+
         let bucketlist_tree = self.store.get_bucketlist_tree()?;
         let raw = bucketlist_tree
             .get(name.as_bytes())
@@ -71,6 +72,27 @@ impl Storage {
         } else {
             Err(StorageError::NamespaceNotFound)
         }
+    }
+
+    /// Update the metadata for a namespace
+    pub fn update_namespace_meta(
+        &self,
+        name: &str,
+        meta: NamespaceMeta,
+    ) -> Result<(), StorageError> {
+        if !self.store.bucket_exists(name)? {
+            return Err(StorageError::NamespaceNotFound);
+        }
+
+        let meta_raw = meta
+            .to_msgpack()
+            .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+
+        let bucketlist_tree = self.store.get_bucketlist_tree()?;
+        bucketlist_tree
+            .insert(name.as_bytes(), meta_raw)
+            .map_err(|e| StorageError::MetaError(e.to_string()))?;
+        Ok(())
     }
 
     pub fn create_namespace(
