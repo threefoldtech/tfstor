@@ -230,7 +230,7 @@ impl Namespace {
         if worm_enabled {
             // In WORM mode, check if key already exists
             if self.exists(key)? {
-                return Err(anyhow::anyhow!("Namespace is protected by worm mode"));
+                return Err(anyhow::anyhow!("ERR: Namespace is protected by worm mode"));
             }
         }
 
@@ -274,7 +274,7 @@ impl Namespace {
         let worm_enabled = self.properties.read().unwrap().worm;
         if worm_enabled {
             return Err(anyhow::anyhow!(
-                "Cannot delete a key when namespace is in worm mode"
+                "ERR: Cannot delete a key when namespace is in worm mode"
             ));
         }
 
