@@ -7,7 +7,7 @@ use tracing::{debug, error, info};
 
 use crate::cmd::{Command, CommandHandler};
 use crate::conn::Conn;
-use crate::namespace::Namespace;
+use crate::namespace::NamespaceCache;
 use crate::resp::RespHelper;
 use crate::storage::Storage;
 
@@ -25,6 +25,9 @@ pub async fn run(addr: String, storage: Storage, admin_password: Option<String>)
     // Create a shared storage instance
     let storage = Arc::new(storage);
 
+    // Create a shared namespace cache
+    let namespace_cache = Arc::new(NamespaceCache::new(storage.clone()));
+
     // Accept connections and process them
     loop {
         match listener.accept().await {
@@ -34,12 +37,17 @@ pub async fn run(addr: String, storage: Storage, admin_password: Option<String>)
                 // Clone the storage for this connection
                 let storage = storage.clone();
 
+                // Clone the namespace cache for this connection
+                let namespace_cache = namespace_cache.clone();
+
                 // Clone the admin password for this connection
                 let admin_password = admin_password.clone();
 
                 // Spawn a new task to handle this connection
                 tokio::spawn(async move {
-                    if let Err(e) = process(socket, storage, admin_password).await {
+                    if let Err(e) =
+                        process(socket, storage, namespace_cache.clone(), admin_password).await
+                    {
                         error!("Error processing connection: {}", e);
                     }
                 });
@@ -54,6 +62,7 @@ pub async fn run(addr: String, storage: Storage, admin_password: Option<String>)
 pub async fn process(
     socket: TcpStream,
     storage: Arc<Storage>,
+    namespace_cache: Arc<NamespaceCache>,
     admin_password: Option<String>,
 ) -> Result<()> {
     // Create a connection abstraction
@@ -61,27 +70,15 @@ pub async fn process(
     let is_admin = admin_password.is_none();
     let mut conn = Conn::new(socket, is_admin);
 
-    // Try to create a namespace for the default namespace
-    let namespace = match Namespace::new(storage.clone(), conn.get_namespace()) {
+    // Try to get or create a namespace for the default namespace using the cache
+    let namespace = match namespace_cache.create_if_not_exists(conn.get_namespace()) {
         Ok(namespace) => namespace,
         Err(e) => {
-            error!("failed to load default namespace: {}", e);
-            // If we can't create the default namespace, try to create it
-            debug!("Default namespace not found, attempting to create it");
-            match storage.create_namespace(&conn.get_namespace()) {
-                Ok(tree) => {
-                    // Create a namespace with the newly created tree
-                    Namespace { tree }
-                }
-                Err(create_err) => {
-                    // If we can't create the namespace, return an error
-                    error!("Failed to create default namespace: {}", create_err);
-                    return Err(anyhow::anyhow!(
-                        "Failed to initialize default namespace: {}",
-                        create_err
-                    ));
-                }
-            }
+            error!("Failed to initialize default namespace: {}", e);
+            return Err(anyhow::anyhow!(
+                "Failed to initialize default namespace: {}",
+                e
+            ));
         }
     };
 
@@ -122,7 +119,7 @@ pub async fn process(
                             conn.set_namespace(namespace.clone());
 
                             // Try to create a new namespace instance
-                            match Namespace::new(storage.clone(), conn.get_namespace()) {
+                            match namespace_cache.get_or_create(conn.get_namespace()) {
                                 Ok(namespace) => {
                                     // Update the handler's tree to use the new namespace
                                     handler = CommandHandler::new(
@@ -157,8 +154,7 @@ pub async fn process(
 
                                         // Update the handler with the new admin status
                                         // We need to recreate the namespace from the current namespace name
-                                        match Namespace::new(storage.clone(), conn.get_namespace())
-                                        {
+                                        match namespace_cache.get_or_create(conn.get_namespace()) {
                                             Ok(namespace) => {
                                                 // Update the handler with the new admin status
                                                 handler = CommandHandler::new(
