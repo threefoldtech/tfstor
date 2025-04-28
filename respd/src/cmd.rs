@@ -56,6 +56,7 @@ pub enum Command {
     },
     Select {
         namespace: String,
+        password: Option<String>,
     },
     NSNew {
         name: String,
@@ -138,7 +139,10 @@ impl Command {
                             }
                         };
 
-                        Ok(Command::Select { namespace })
+                        Ok(Command::Select {
+                            namespace,
+                            password: None,
+                        })
                     }
                     "NSNEW" => {
                         if array.len() != 2 {
@@ -316,7 +320,6 @@ impl Command {
                         } else {
                             None
                         };
-
                         Ok(Command::Ping { message })
                     }
                     "LENGTH" => {
@@ -357,6 +360,7 @@ impl Command {
                         if array.len() != 2 {
                             return Err(CommandError::WrongNumberOfArguments("AUTH".to_string()));
                         }
+
                         let password = match &array[1] {
                             Frame::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
                             _ => {
@@ -694,6 +698,14 @@ impl CommandHandler {
                         Ok(prop_value) => meta.locked = prop_value.to_bool(),
                         Err(e) => return Frame::Error(format!("ERR {}", e)),
                     },
+                    "password" => {
+                        // If value is empty string, remove password
+                        if value.is_empty() {
+                            meta.password = None;
+                        } else {
+                            meta.password = Some(value);
+                        }
+                    }
                     _ => return Frame::Error(format!("ERR Unknown property: {}", property)),
                 }
 
