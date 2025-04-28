@@ -20,6 +20,9 @@ pub struct NamespaceProperties {
     pub worm: bool,
     /// Locked mode - if true, no set or delete operations are allowed
     pub locked: bool,
+    /// Flag indicating if the connection has been authenticated for this namespace
+    /// This is set to true if the namespace has no password or if the correct password was provided
+    pub namespace_authenticated: bool,
 }
 
 impl Default for NamespaceProperties {
@@ -28,6 +31,7 @@ impl Default for NamespaceProperties {
             namespace_name: "default".to_string(),
             worm: false,
             locked: false,
+            namespace_authenticated: true, // Default namespace doesn't require authentication
         }
     }
 }
@@ -221,6 +225,9 @@ impl Namespace {
         let mut props = self.properties.write().unwrap();
         props.worm = meta.worm;
         props.locked = meta.locked;
+        // If the namespace has a password, set namespace_authenticated to false by default
+        // It will be set to true when the correct password is provided in the SELECT command
+        props.namespace_authenticated = meta.password.is_none();
         Ok(())
     }
 
@@ -239,11 +246,23 @@ impl Namespace {
             } else {
                 "0".to_string()
             }),
+            "authenticated" => Ok(if props.namespace_authenticated {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }),
             _ => Err(MetaError::OtherDBError(format!(
                 "Unknown property: {}",
                 property
             ))),
         }
+    }
+
+    /// Set the authentication status for this namespace
+    pub fn set_authenticated(&self, authenticated: bool) {
+        let mut props = self.properties.write().unwrap();
+        props.namespace_authenticated = authenticated;
+        debug!("Set namespace authentication status to {}", authenticated);
     }
 
     pub fn set(&self, key: &[u8], value: Bytes) -> Result<()> {
@@ -263,6 +282,13 @@ impl Namespace {
             if self.exists(key)? {
                 return Err(anyhow::anyhow!("ERR: Namespace is protected by worm mode"));
             }
+        }
+
+        // Check if the connection is authenticated for this namespace
+        if !props.namespace_authenticated {
+            return Err(anyhow::anyhow!(
+                "ERR: Authentication required for write operations"
+            ));
         }
 
         // Proceed with setting the key
@@ -315,6 +341,13 @@ impl Namespace {
         if props.worm {
             return Err(anyhow::anyhow!(
                 "ERR: Cannot delete a key when namespace is in worm mode"
+            ));
+        }
+
+        // Check if the connection is authenticated for this namespace
+        if !props.namespace_authenticated {
+            return Err(anyhow::anyhow!(
+                "ERR: Authentication required for write operations"
             ));
         }
 

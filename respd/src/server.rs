@@ -119,30 +119,70 @@ pub async fn process(
                     // Process the frame
                     // Select and Auth commands are special so we handle them separately here
                     let response = match Command::from_frame(frame) {
-                        Ok(Command::Select { namespace }) => {
-                            // Special handling for SELECT command to set the namespace
+                        Ok(Command::Select {
+                            namespace,
+                            password,
+                        }) => {
+                            // Special handling for SELECT command to switch namespaces
                             debug!("Handling SELECT command for namespace: {}", namespace);
+
+                            // Switch the connection's namespace
                             conn.set_namespace(namespace.clone());
 
-                            // Try to create a new namespace instance
-                            match namespace_cache.get_or_create(conn.get_namespace()) {
-                                Ok(namespace) => {
-                                    // Update the handler's tree to use the new namespace
+                            // Get or create the namespace from the cache
+                            match namespace_cache.get_or_create(namespace.clone()) {
+                                Ok(namespace_obj) => {
+                                    // Check if the namespace has a password
+                                    let is_authenticated =
+                                        match storage.get_namespace_meta(&namespace) {
+                                            Ok(meta) => {
+                                                match &meta.password {
+                                                    Some(ns_password) => {
+                                                        // If password is provided and matches, authenticate
+                                                        if let Some(provided_password) = &password {
+                                                            let authenticated =
+                                                                provided_password == ns_password;
+                                                            namespace_obj
+                                                                .set_authenticated(authenticated);
+                                                            authenticated
+                                                        } else {
+                                                            // No password provided, but namespace has one
+                                                            // User can still access but can't write
+                                                            namespace_obj.set_authenticated(false);
+                                                            false
+                                                        }
+                                                    }
+                                                    None => {
+                                                        // Namespace has no password, always authenticated
+                                                        namespace_obj.set_authenticated(true);
+                                                        true
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("Error getting namespace metadata: {}", e);
+                                                // Default to not authenticated on error
+                                                namespace_obj.set_authenticated(false);
+                                                false
+                                            }
+                                        };
+
+                                    // Update the handler with the new namespace
                                     handler = CommandHandler::new(
                                         storage.clone(),
-                                        namespace,
+                                        namespace_obj,
                                         namespace_cache.clone(),
                                         conn.is_admin(),
                                     );
-                                    Frame::SimpleString("OK".into())
+
+                                    if is_authenticated {
+                                        Frame::SimpleString("OK".into())
+                                    } else {
+                                        Frame::SimpleString("OK (read-only access)".into())
+                                    }
                                 }
                                 Err(e) => {
-                                    // Forward the error message to the client
-                                    error!(
-                                        "Error selecting namespace {}: {}",
-                                        conn.get_namespace(),
-                                        e
-                                    );
+                                    error!("Error selecting namespace: {}", e);
                                     Frame::Error(format!("ERR {}", e))
                                 }
                             }
