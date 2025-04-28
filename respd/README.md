@@ -34,6 +34,7 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | NSNEW <n>      | Create a new namespace (admin only)      | `NSNEW mynamespace`                |
 | NSINFO <n>     | Show info about a namespace              | `NSINFO mynamespace`               |
 | NSLIST           | List all available namespaces            | `NSLIST`                           |
+| NSSET <n> <prop> <val> | Set a property for a namespace (admin only) | `NSSET mynamespace worm 1`         |
 | DBSIZE           | Get the number of keys in the current namespace (approximate) | `DBSIZE`                          |
 | SCAN [cursor]     | Incrementally iterate over keys in the current namespace | `SCAN 0` or `SCAN mycursor`        |
 
@@ -44,9 +45,28 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 
 ## Features
 - Redis protocol compatibility (subset)
-- Namespace support
+- Namespace support with configurable properties
 - Data integrity checking
 - Simple to run and integrate
+
+## Namespace Properties
+
+Namespaces can be configured with various properties using the `NSSET` command. These properties control the behavior and security of the namespace.
+
+| Property | Values | Description |
+|----------|--------|-------------|
+| `password` | string | Sets a password for the namespace. When set, users must authenticate with `AUTH` before performing operations. |
+| `worm` | 0 or 1 | Write Once Read Many mode. When enabled (1), keys cannot be modified or deleted once written. |
+| `lock` | 0 or 1 | Temporarily locks the namespace. When enabled (1), write operations are not allowed. |
+| `public` | 0 or 1 | Controls read access. When disabled (0), users must authenticate to perform read operations like GET and MGET. Default is enabled (1). |
+
+Example usage:
+```
+NSSET mynamespace password mysecretpassword  # Set namespace password
+NSSET mynamespace worm 1                    # Enable WORM mode
+NSSET mynamespace lock 1                    # Lock namespace (read-only)
+NSSET mynamespace public 0                  # Require authentication for read operations
+```
 
 ## Known Limitations
 - The `NSLIST` command currently collects all namespace names before sending the response. Future improvements will implement streaming responses to handle large numbers of namespaces more efficiently.

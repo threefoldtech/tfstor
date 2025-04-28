@@ -500,6 +500,15 @@ impl CommandHandler {
     /// Handle GET command
     async fn handle_get(&self, key: String) -> Frame {
         debug!("Handling GET command for key: {}", key);
+
+        // Check if namespace requires authentication for read operations
+        let props = self.namespace.properties.read().unwrap();
+
+        // If namespace is not public and user is not authenticated, deny access
+        if !props.public && !self.namespace_authenticated {
+            return Frame::Error("ERR Authentication required for read operations".into());
+        }
+
         match self.namespace.get(key.as_bytes()) {
             Ok(Some(value)) => Frame::BulkString(value.to_vec()),
             Ok(None) => Frame::Null,
@@ -512,7 +521,15 @@ impl CommandHandler {
 
     /// Handle MGET command - get multiple keys at once
     async fn handle_mget(&self, keys: Vec<String>) -> Frame {
-        debug!("Handling MGET command for keys: {:?}", keys);
+        debug!("Handling MGET command for {} keys", keys.len());
+
+        // Check if namespace requires authentication for read operations
+        let props = self.namespace.properties.read().unwrap();
+
+        // If namespace is not public and user is not authenticated, deny access
+        if !props.public && !self.namespace_authenticated {
+            return Frame::Error("ERR Authentication required for read operations".into());
+        }
 
         let mut values = Vec::with_capacity(keys.len());
 
@@ -579,6 +596,15 @@ impl CommandHandler {
     /// Handle EXISTS command
     async fn handle_exists(&self, key: String) -> Frame {
         debug!("Handling EXISTS command for key: {}", key);
+
+        // Check if namespace requires authentication for read operations
+        let props = self.namespace.properties.read().unwrap();
+
+        // If namespace is not public and user is not authenticated, deny access
+        if !props.public && !self.namespace_authenticated {
+            return Frame::Error("ERR Authentication required for read operations".into());
+        }
+
         match self.namespace.exists(key.as_bytes()) {
             Ok(true) => Frame::Integer(1),  // Key exists
             Ok(false) => Frame::Integer(0), // Key does not exist
@@ -729,6 +755,10 @@ impl CommandHandler {
                         Ok(prop_value) => meta.locked = prop_value.to_bool(),
                         Err(e) => return Frame::Error(format!("ERR {}", e)),
                     },
+                    "public" => match value.parse::<BoolPropertyValue>() {
+                        Ok(prop_value) => meta.public = prop_value.to_bool(),
+                        Err(e) => return Frame::Error(format!("ERR {}", e)),
+                    },
                     "password" => {
                         // If value is empty string, remove password
                         if value.is_empty() {
@@ -743,6 +773,7 @@ impl CommandHandler {
                 // Store the property values before moving meta
                 let worm_value = meta.worm;
                 let locked_value = meta.locked;
+                let public_value = meta.public;
 
                 // Persist the updated metadata
                 match self.storage.update_namespace_meta(&namespace, meta) {
@@ -755,6 +786,7 @@ impl CommandHandler {
                             match property.to_lowercase().as_str() {
                                 "worm" => props.worm = worm_value,
                                 "lock" => props.locked = locked_value,
+                                "public" => props.public = public_value,
                                 _ => {} // Should never happen due to earlier check
                             }
                             debug!(

@@ -20,6 +20,8 @@ pub struct NamespaceProperties {
     pub worm: bool,
     /// Locked mode - if true, no set or delete operations are allowed
     pub locked: bool,
+    /// Public mode - if false and password is set, authentication is required for read operations
+    pub public: bool,
 }
 
 impl Default for NamespaceProperties {
@@ -28,6 +30,7 @@ impl Default for NamespaceProperties {
             namespace_name: "default".to_string(),
             worm: false,
             locked: false,
+            public: true, // Default to public access
         }
     }
 }
@@ -221,6 +224,7 @@ impl Namespace {
         let mut props = self.properties.write().unwrap();
         props.worm = meta.worm;
         props.locked = meta.locked;
+        props.public = meta.public;
         Ok(())
     }
 
@@ -235,6 +239,11 @@ impl Namespace {
                 "0".to_string()
             }),
             "lock" => Ok(if props.locked {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }),
+            "public" => Ok(if props.public {
                 "1".to_string()
             } else {
                 "0".to_string()
