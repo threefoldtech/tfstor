@@ -140,21 +140,18 @@ pub async fn process(
                                                     Some(ns_password) => {
                                                         // If password is provided and matches, authenticate
                                                         if let Some(provided_password) = &password {
-                                                            let authenticated =
-                                                                provided_password == ns_password;
-                                                            namespace_obj
-                                                                .set_authenticated(authenticated);
-                                                            authenticated
+                                                            // We'll set the authentication status in the CommandHandler later
+                                                            provided_password == ns_password
                                                         } else {
                                                             // No password provided, but namespace has one
                                                             // User can still access but can't write
-                                                            namespace_obj.set_authenticated(false);
+                                                            // We'll set the authentication status in the CommandHandler later
                                                             false
                                                         }
                                                     }
                                                     None => {
                                                         // Namespace has no password, always authenticated
-                                                        namespace_obj.set_authenticated(true);
+                                                        // We'll set the authentication status in the CommandHandler later
                                                         true
                                                     }
                                                 }
@@ -162,18 +159,23 @@ pub async fn process(
                                             Err(e) => {
                                                 error!("Error getting namespace metadata: {}", e);
                                                 // Default to not authenticated on error
-                                                namespace_obj.set_authenticated(false);
+                                                // We'll set the authentication status in the CommandHandler later
                                                 false
                                             }
                                         };
 
                                     // Update the handler with the new namespace
-                                    handler = CommandHandler::new(
+                                    // Create a new command handler with the new namespace
+                                    let mut new_handler = CommandHandler::new(
                                         storage.clone(),
                                         namespace_obj,
                                         namespace_cache.clone(),
                                         conn.is_admin(),
                                     );
+
+                                    // Set the authentication status in the new handler
+                                    new_handler.set_namespace_authenticated(is_authenticated);
+                                    handler = new_handler;
 
                                     if is_authenticated {
                                         Frame::SimpleString("OK".into())
