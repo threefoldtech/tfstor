@@ -30,7 +30,7 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | LENGTH <key>      | Get the size (in bytes) of a key's value, returns nil if key doesn't exist | `LENGTH mykey`                     |
 | KEYTIME <key>     | Get the last-update timestamp of a key (Unix time), returns nil if key doesn't exist | `KEYTIME mykey`                    |
 | AUTH <password>   | Authenticate as admin                    | `AUTH mypassword`                  |
-| SELECT <namespace>| Switch to a different namespace          | `SELECT mynamespace`               |
+| SELECT <namespace> [password]| Switch to a different namespace (with optional password for protected namespaces) | `SELECT mynamespace` or `SELECT mynamespace mypassword` |
 | NSNEW <n>      | Create a new namespace (admin only)      | `NSNEW mynamespace`                |
 | NSINFO <n>     | Show info about a namespace              | `NSINFO mynamespace`               |
 | NSLIST           | List all available namespaces            | `NSLIST`                           |
@@ -55,7 +55,7 @@ Namespaces can be configured with various properties using the `NSSET` command. 
 
 | Property | Values | Description |
 |----------|--------|-------------|
-| `password` | string | Sets a password for the namespace. When set, users must authenticate with `AUTH` before performing operations. |
+| `password` | string | Sets a password for the namespace. When set, users must provide the password when using the `SELECT` command to switch to that namespace. Without authentication, write operations are denied and read operations may be restricted based on the `public` property. |
 | `worm` | 0 or 1 | Write Once Read Many mode. When enabled (1), keys cannot be modified or deleted once written. |
 | `lock` | 0 or 1 | Temporarily locks the namespace. When enabled (1), write operations are not allowed. |
 | `public` | 0 or 1 | Controls read access. When disabled (0), users must authenticate to perform read operations like GET and MGET. Default is enabled (1). |
