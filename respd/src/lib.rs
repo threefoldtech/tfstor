@@ -4,6 +4,7 @@
 pub mod cmd;
 pub mod conn;
 pub mod namespace;
+pub mod property;
 pub mod resp;
 pub mod server;
 pub mod storage;
