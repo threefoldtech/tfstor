@@ -427,6 +427,10 @@ pub struct CommandHandler {
 
     // Flag indicating if this connection has admin privileges
     is_admin: bool,
+
+    // Flag indicating if this connection is authenticated for the current namespace
+    // This is set to true if the namespace has no password or if the correct password was provided
+    namespace_authenticated: bool,
 }
 
 impl CommandHandler {
@@ -437,12 +441,27 @@ impl CommandHandler {
         namespace_cache: Arc<NamespaceCache>,
         is_admin: bool,
     ) -> Self {
+        // Check if namespace has a password by querying its metadata
+        let namespace_authenticated = match storage
+            .get_namespace_meta(&namespace.properties.read().unwrap().namespace_name)
+        {
+            Ok(meta) => meta.password.is_none(),
+            Err(_) => true, // Default to authenticated if we can't get metadata
+        };
+
         Self {
             storage,
             namespace,
             namespace_cache,
             is_admin,
+            namespace_authenticated,
         }
+    }
+
+    /// Set the authentication status for the current namespace
+    pub fn set_namespace_authenticated(&mut self, authenticated: bool) {
+        self.namespace_authenticated = authenticated;
+        debug!("Set namespace authentication status to {}", authenticated);
     }
 
     /// Execute a command and return the response frame
@@ -516,6 +535,12 @@ impl CommandHandler {
     /// Handle SET command
     async fn handle_set(&self, key: String, value: Bytes) -> Frame {
         debug!("Handling SET command for key: {}", key);
+
+        // Check if the connection is authenticated for this namespace
+        if !self.namespace_authenticated {
+            return Frame::Error("ERR: Authentication required for write operations".into());
+        }
+
         match self.namespace.set(key.as_bytes(), value) {
             Ok(()) => Frame::SimpleString("OK".into()),
             Err(e) => {
@@ -536,6 +561,12 @@ impl CommandHandler {
     /// Handle DEL command
     async fn handle_del(&self, key: String) -> Frame {
         debug!("Handling DEL command for key: {}", key);
+
+        // Check if the connection is authenticated for this namespace
+        if !self.namespace_authenticated {
+            return Frame::Error("ERR: Authentication required for write operations".into());
+        }
+
         match self.namespace.del(key.as_bytes()) {
             Ok(()) => Frame::Integer(1), // Successfully deleted 1 key
             Err(e) => {
