@@ -144,9 +144,8 @@ impl Drop for TestServer {
     }
 }
 
-// Run the tests one at a time to avoid port conflicts
 #[cfg(test)]
-mod test_config {
+mod tests {
     use super::*;
 
     #[test]
@@ -228,7 +227,6 @@ mod test_config {
         let server = TestServer::new_with_admin(Some("admin123".to_string()));
         let mut conn = server.connect();
 
-        // Create a namespace
         // First, authenticate as admin
         let auth_result: String = redis::cmd("AUTH")
             .arg("admin123")
