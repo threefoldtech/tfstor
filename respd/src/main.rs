@@ -6,6 +6,7 @@ use tracing::info;
 mod cmd;
 mod conn;
 mod namespace;
+mod property;
 mod resp;
 mod server;
 mod storage;

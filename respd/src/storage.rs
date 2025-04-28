@@ -141,7 +141,7 @@ pub struct NamespaceMeta {
     pub name: String,
     pub password: Option<String>,
     pub max_size: Option<u64>,
-    pub private: bool,
+    pub public: bool,
     pub worm: bool,
     pub locked: bool,
     pub key_mode: KeyMode,
@@ -155,14 +155,12 @@ pub enum KeyMode {
 
 impl NamespaceMeta {
     /// Create a new NamespaceMeta with default values
-    ///
-    /// All fields are defaulted to false/None except for the name
     pub fn new(name: String) -> Self {
         Self {
             name,
             password: None,
             max_size: None,
-            private: false,
+            public: true,
             worm: false,
             locked: false,
             key_mode: KeyMode::UserKey,

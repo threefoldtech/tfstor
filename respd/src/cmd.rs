@@ -5,6 +5,7 @@ use thiserror::Error;
 use tracing::{debug, error};
 
 use crate::namespace::{Namespace, NamespaceCache};
+use crate::property::BoolPropertyValue;
 use crate::storage::Storage;
 
 #[derive(Debug, Error)]
@@ -621,7 +622,7 @@ impl CommandHandler {
                 let info = format!(
                     "# namespace\nname: {}\npublic: {}\npassword: {}\ndata_limits_bytes: {}\nmode: {}\nworm: {}\nlocked: {}",
                     meta.name,
-                    if meta.private { "no" } else { "yes" },
+                    if meta.public { "yes" } else { "no" },
                     if meta.password.is_some() { "yes" } else { "no" },
                     meta.max_size.unwrap_or(0),
                     match meta.key_mode {
@@ -685,25 +686,13 @@ impl CommandHandler {
             Ok(mut meta) => {
                 // Update the property based on input
                 match property.to_lowercase().as_str() {
-                    "worm" => match value.as_str() {
-                        "1" => meta.worm = true,
-                        "0" => meta.worm = false,
-                        _ => {
-                            return Frame::Error(format!(
-                                "ERR Invalid value for worm property: {}",
-                                value
-                            ))
-                        }
+                    "worm" => match value.parse::<BoolPropertyValue>() {
+                        Ok(prop_value) => meta.worm = prop_value.to_bool(),
+                        Err(e) => return Frame::Error(format!("ERR {}", e)),
                     },
-                    "lock" => match value.as_str() {
-                        "1" => meta.locked = true,
-                        "0" => meta.locked = false,
-                        _ => {
-                            return Frame::Error(format!(
-                                "ERR Invalid value for lock property: {}",
-                                value
-                            ))
-                        }
+                    "lock" => match value.parse::<BoolPropertyValue>() {
+                        Ok(prop_value) => meta.locked = prop_value.to_bool(),
+                        Err(e) => return Frame::Error(format!("ERR {}", e)),
                     },
                     _ => return Frame::Error(format!("ERR Unknown property: {}", property)),
                 }
@@ -726,8 +715,8 @@ impl CommandHandler {
                                 _ => {} // Should never happen due to earlier check
                             }
                             debug!(
-                                "Updated namespace {} in cache with property {}: {}",
-                                namespace, property, worm_value
+                                "Updated namespace {} in cache with property {}",
+                                namespace, property
                             );
                         });
 
