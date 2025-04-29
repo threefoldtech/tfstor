@@ -126,7 +126,10 @@ impl Command {
                         Ok(Command::MGet { keys })
                     }
                     "SELECT" => {
-                        if array.len() != 2 {
+                        // SELECT command should accept 2 or 3 arguments
+                        // 2 args: SELECT namespace
+                        // 3 args: SELECT namespace password
+                        if array.len() < 2 || array.len() > 3 {
                             return Err(CommandError::WrongNumberOfArguments("SELECT".to_string()));
                         }
 
@@ -139,9 +142,25 @@ impl Command {
                             }
                         };
 
+                        // Parse optional password if provided
+                        let password = if array.len() == 3 {
+                            match &array[2] {
+                                Frame::BulkString(bytes) => {
+                                    Some(String::from_utf8_lossy(bytes).to_string())
+                                }
+                                _ => {
+                                    return Err(CommandError::Protocol(
+                                        "SELECT password must be a bulk string".to_string(),
+                                    ))
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
                         Ok(Command::Select {
                             namespace,
-                            password: None,
+                            password,
                         })
                     }
                     "NSNEW" => {
