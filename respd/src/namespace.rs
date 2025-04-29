@@ -148,6 +148,28 @@ impl NamespaceCache {
             }
         }
     }
+
+    /// Flush a namespace by dropping and recreating its bucket
+    /// This operation will clear all keys in the namespace
+    pub fn flush_namespace(&self, name: &str) -> Result<(), StorageError> {
+        // Write lock the cache to prevent concurrent access during flush
+        let _namespaces_lock = self.namespaces.write().unwrap();
+
+        // Get current namespace metadata before dropping the bucket
+        let namespace_meta = self.storage.get_namespace_meta(name)?;
+
+        // Drop the bucket from storage
+        self.storage.delete_namespace(name)?;
+
+        // Create a new namespace with the same name
+        let _ = self.storage.create_namespace(name)?;
+
+        // Restore the original metadata to preserve properties
+        self.storage.update_namespace_meta(name, namespace_meta)?;
+
+        debug!("Flushed namespace: {}", name);
+        Ok(())
+    }
 }
 
 impl Namespace {
@@ -162,6 +184,19 @@ impl Namespace {
         props.worm = meta.worm;
         props.locked = meta.locked;
         props.public = meta.public;
+        Ok(())
+    }
+
+    pub fn flush(&self, namespace_cache: &NamespaceCache) -> Result<()> {
+        // Get the namespace name
+        let namespace_name = self.properties.read().unwrap().namespace_name.clone();
+
+        // Check if this is the default namespace
+        if namespace_name == "default" {
+            return Err(anyhow::anyhow!("ERR: Cannot flush the default namespace"));
+        }
+
+        namespace_cache.flush_namespace(&namespace_name)?;
         Ok(())
     }
 
