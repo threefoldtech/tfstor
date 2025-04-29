@@ -174,7 +174,6 @@ impl NamespaceMeta {
     }
 
     /// Decode a NamespaceMeta from MessagePack format
-    #[allow(dead_code)]
     pub fn from_msgpack(data: &[u8]) -> Result<Self> {
         rmp_serde::from_slice(data)
             .map_err(|e| anyhow::anyhow!("Failed to decode NamespaceMeta from MessagePack: {}", e))

@@ -435,7 +435,6 @@ impl Command {
 
 /// Handler for Redis commands
 pub struct CommandHandler {
-    #[allow(dead_code)]
     storage: Arc<Storage>,
 
     // Namespace for this connection

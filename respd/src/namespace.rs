@@ -14,7 +14,6 @@ use metastore::{MetaError, MetaTreeExt, Object, ObjectData};
 #[derive(Debug, Clone)]
 pub struct NamespaceProperties {
     /// Name of the namespace this properties belongs to
-    #[allow(dead_code)]
     pub namespace_name: String,
     /// Write Once Read Many mode - if true, keys can only be written once and never modified or deleted
     pub worm: bool,
@@ -100,20 +99,6 @@ impl NamespaceCache {
         Ok(namespace)
     }
 
-    /// Get a namespace from the cache without creating it if it doesn't exist
-    #[allow(dead_code)]
-    pub fn get(&self, name: &str) -> Result<Arc<Namespace>, StorageError> {
-        // Try to get from cache
-        let namespaces = self.namespaces.read().unwrap();
-        if let Some(namespace) = namespaces.get(name) {
-            debug!("Using cached namespace: {}", name);
-            return Ok(namespace.clone());
-        }
-
-        // Not in cache
-        Err(StorageError::NamespaceNotFound)
-    }
-
     /// Update all instances of a namespace in the cache
     /// This ensures that all clients using this namespace will see the updated properties
     pub fn update_all_instances<F>(&self, name: &str, update_fn: F)
@@ -166,54 +151,6 @@ impl NamespaceCache {
 }
 
 impl Namespace {
-    // Create a new namespace with the given name and storage
-    /*pub fn new(storage: Arc<Storage>, name: String) -> Result<Self, StorageError> {
-        let tree = storage.get_namespace(name.as_str())?;
-        Ok(Self {
-            tree: Arc::new(tree),
-        })
-    }*/
-
-    /// Set a property for this namespace
-    /// Note: This only updates the in-memory properties, not the persistent metadata
-    /// For persistent changes, use the NSSET command which updates both
-    #[allow(dead_code)]
-    pub fn set_property(&self, property: &str, value: &str) -> Result<(), MetaError> {
-        let mut props = self.properties.write().unwrap();
-        match property.to_lowercase().as_str() {
-            "worm" => {
-                match value {
-                    "1" => props.worm = true,
-                    "0" => props.worm = false,
-                    _ => {
-                        return Err(MetaError::OtherDBError(format!(
-                            "Invalid value for worm property: {}",
-                            value
-                        )))
-                    }
-                }
-                Ok(())
-            }
-            "lock" => {
-                match value {
-                    "1" => props.locked = true,
-                    "0" => props.locked = false,
-                    _ => {
-                        return Err(MetaError::OtherDBError(format!(
-                            "Invalid value for lock property: {}",
-                            value
-                        )))
-                    }
-                }
-                Ok(())
-            }
-            _ => Err(MetaError::OtherDBError(format!(
-                "Unknown property: {}",
-                property
-            ))),
-        }
-    }
-
     /// Sync properties with the persistent metadata
     /// This is called when the namespace is loaded to ensure in-memory properties
     /// reflect the persistent metadata
@@ -226,33 +163,6 @@ impl Namespace {
         props.locked = meta.locked;
         props.public = meta.public;
         Ok(())
-    }
-
-    /// Get a property value as string
-    #[allow(dead_code)]
-    pub fn get_property(&self, property: &str) -> Result<String, MetaError> {
-        let props = self.properties.read().unwrap();
-        match property.to_lowercase().as_str() {
-            "worm" => Ok(if props.worm {
-                "1".to_string()
-            } else {
-                "0".to_string()
-            }),
-            "lock" => Ok(if props.locked {
-                "1".to_string()
-            } else {
-                "0".to_string()
-            }),
-            "public" => Ok(if props.public {
-                "1".to_string()
-            } else {
-                "0".to_string()
-            }),
-            _ => Err(MetaError::OtherDBError(format!(
-                "Unknown property: {}",
-                property
-            ))),
-        }
     }
 
     pub fn set(&self, key: &[u8], value: Bytes) -> Result<()> {
