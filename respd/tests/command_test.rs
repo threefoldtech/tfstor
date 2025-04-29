@@ -63,3 +63,29 @@ fn test_select_command_parsing() {
         Err(CommandError::WrongNumberOfArguments(_))
     ));
 }
+
+#[test]
+fn test_flush_command_parsing() {
+    // Test FLUSH command with correct number of arguments (1 argument - just the command name)
+    let frame = Frame::Array(vec![Frame::BulkString(b"FLUSH".to_vec())]);
+
+    let cmd = Command::from_frame(frame).unwrap();
+    match cmd {
+        Command::Flush => {
+            // Command parsed correctly
+        }
+        _ => panic!("Expected FLUSH command"),
+    }
+
+    // Test FLUSH with too many arguments
+    let frame = Frame::Array(vec![
+        Frame::BulkString(b"FLUSH".to_vec()),
+        Frame::BulkString(b"extra_arg".to_vec()),
+    ]);
+
+    let result = Command::from_frame(frame);
+    assert!(matches!(
+        result,
+        Err(CommandError::WrongNumberOfArguments(_))
+    ));
+}

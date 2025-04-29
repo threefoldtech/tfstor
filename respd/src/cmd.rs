@@ -77,6 +77,7 @@ pub enum Command {
         property: String,
         value: String,
     },
+    Flush,
     // Add more commands as needed
 }
 
@@ -423,6 +424,12 @@ impl Command {
 
                         Ok(Command::Scan { cursor })
                     }
+                    "FLUSH" => {
+                        if array.len() != 1 {
+                            return Err(CommandError::WrongNumberOfArguments("FLUSH".to_string()));
+                        }
+                        Ok(Command::Flush)
+                    }
                     _ => Err(CommandError::UnknownCommand(command_name)),
                 }
             }
@@ -502,6 +509,7 @@ impl CommandHandler {
                 property,
                 value,
             } => self.handle_nsset(namespace, property, value).await,
+            Command::Flush => self.handle_flush().await,
             Command::DBSize => self.handle_dbsize(),
             Command::Scan { cursor } => self.handle_scan(cursor).await,
             Command::Select { .. } => {
@@ -879,6 +887,47 @@ impl CommandHandler {
             }
             Err(e) => {
                 error!("Error scanning keys: {}", e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle FLUSH command - delete all keys in the current namespace
+    /// This command is only allowed on private and password protected namespaces
+    async fn handle_flush(&self) -> Frame {
+        debug!("Handling FLUSH command");
+
+        // Get namespace properties
+        let props = self.namespace.properties.read().unwrap();
+        let namespace_name = props.namespace_name.clone();
+
+        // Check if the namespace is private (not public)
+        if props.public {
+            return Frame::Error("ERR: FLUSH command is only allowed on private namespaces".into());
+        }
+
+        // Check if the namespace is password-protected by checking if it has a password
+        let has_password = match self.storage.get_namespace_meta(&namespace_name) {
+            Ok(meta) => meta.password.is_some(),
+            Err(_) => false,
+        };
+
+        if !has_password {
+            return Frame::Error(
+                "ERR: FLUSH command is only allowed on password-protected namespaces".into(),
+            );
+        }
+
+        // Check if the connection is authenticated for this namespace
+        if !self.namespace_authenticated {
+            return Frame::Error("ERR: Authentication required for FLUSH command".into());
+        }
+
+        // Execute the flush operation
+        match self.namespace.flush(self.namespace_cache.as_ref()) {
+            Ok(_) => Frame::SimpleString("OK".into()),
+            Err(e) => {
+                error!("Error flushing namespace: {}", e);
                 Frame::Error(format!("ERR {}", e))
             }
         }

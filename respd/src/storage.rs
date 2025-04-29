@@ -102,11 +102,23 @@ impl Storage {
         if self.store.bucket_exists(name)? {
             return Err(StorageError::NamespaceNotFound);
         }
+
         let namespace_meta_raw = NamespaceMeta::new(name.to_string())
             .to_msgpack()
             .map_err(|e| MetaError::OtherDBError(e.to_string()))?;
+
         self.store.insert_bucket(name, namespace_meta_raw)?;
+
         self.get_namespace(name)
+    }
+
+    pub fn delete_namespace(&self, name: &str) -> Result<(), StorageError> {
+        if !self.store.bucket_exists(name)? {
+            return Err(StorageError::NamespaceNotFound);
+        }
+
+        self.store.drop_bucket(name)?;
+        Ok(())
     }
 
     /// Iterate over all namespaces in the storage
