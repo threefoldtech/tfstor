@@ -37,7 +37,7 @@ impl Default for NamespaceProperties {
 /// Represents a namespace with its associated tree
 pub struct Namespace {
     /// The tree for this namespace
-    pub tree: Arc<dyn MetaTreeExt + Send + Sync>,
+    pub tree: RwLock<Arc<dyn MetaTreeExt + Send + Sync>>,
     /// Properties for this namespace
     pub properties: RwLock<NamespaceProperties>,
 }
@@ -81,7 +81,7 @@ impl NamespaceCache {
             ..Default::default()
         };
         let namespace = Arc::new(Namespace {
-            tree: Arc::from(tree),
+            tree: RwLock::new(Arc::from(tree)),
             properties: RwLock::new(props),
         });
 
@@ -129,7 +129,7 @@ impl NamespaceCache {
                     ..Default::default()
                 };
                 let namespace = Arc::new(Namespace {
-                    tree: Arc::from(tree),
+                    tree: RwLock::new(Arc::from(tree)),
                     properties: RwLock::new(props),
                 });
 
@@ -153,19 +153,39 @@ impl NamespaceCache {
     /// This operation will clear all keys in the namespace
     pub fn flush_namespace(&self, name: &str) -> Result<(), StorageError> {
         // Write lock the cache to prevent concurrent access during flush
-        let _namespaces_lock = self.namespaces.write().unwrap();
+        let namespaces_lock = self.namespaces.read().unwrap();
 
-        // Get current namespace metadata before dropping the bucket
-        let namespace_meta = self.storage.get_namespace_meta(name)?;
+        // Get the namespace from the cache
+        if let Some(namespace) = namespaces_lock.get(name) {
+            // Get current namespace metadata before dropping the bucket
+            let namespace_meta = self.storage.get_namespace_meta(name)?;
 
-        // Drop the bucket from storage
-        self.storage.delete_namespace(name)?;
+            // Drop the old tree by replacing it with a new one
+            {
+                let placeholder_tree = self.storage.get_namespace("default")?;
 
-        // Create a new namespace with the same name
-        let _ = self.storage.create_namespace(name)?;
+                // Get a write lock on the tree
+                let mut tree_lock = namespace.tree.write().unwrap();
 
-        // Restore the original metadata to preserve properties
-        self.storage.update_namespace_meta(name, namespace_meta)?;
+                // Replace the old tree with the placeholder
+                *tree_lock = Arc::from(placeholder_tree);
+
+                // The lock will be dropped at the end of this scope, releasing the placeholder tree
+            }
+
+            // Drop the bucket from storage
+            self.storage.delete_namespace(name)?;
+
+            // Create a new namespace with the same name
+            let new_tree = self.storage.create_namespace(name)?;
+
+            // Assign the new tree to the namespace
+            let mut tree_lock = namespace.tree.write().unwrap();
+            *tree_lock = Arc::from(new_tree);
+
+            // Restore the original metadata to preserve properties
+            self.storage.update_namespace_meta(name, namespace_meta)?;
+        }
 
         debug!("Flushed namespace: {}", name);
         Ok(())
@@ -226,13 +246,13 @@ impl Namespace {
         let hash = Md5::digest(&data).into();
         let size = data.len() as u64;
         let obj_meta = Object::new(size, hash, ObjectData::Inline { data });
-        self.tree.insert(key, obj_meta.to_vec())?;
+        self.tree.read().unwrap().insert(key, obj_meta.to_vec())?;
         Ok(())
     }
 
     /// Get an Object from the tree for a given key
     fn get_object(&self, key: &[u8]) -> Result<Option<Object>, MetaError> {
-        match self.tree.get(key)? {
+        match self.tree.read().unwrap().get(key)? {
             Some(data) => {
                 let obj = Object::try_from(&*data).expect("Malformed object");
                 Ok(Some(obj))
@@ -277,12 +297,12 @@ impl Namespace {
         // Note: Authentication check is now handled by the CommandHandler
 
         // Proceed with deleting the key
-        self.tree.remove(key)?;
+        self.tree.read().unwrap().remove(key)?;
         Ok(())
     }
 
     pub fn exists(&self, key: &[u8]) -> Result<bool, MetaError> {
-        self.tree.contains_key(key)
+        self.tree.read().unwrap().contains_key(key)
     }
 
     /// Get the length (size) of a key's value
@@ -332,7 +352,7 @@ impl Namespace {
     }
 
     pub fn num_keys(&self) -> usize {
-        self.tree.len()
+        self.tree.read().unwrap().len()
     }
 
     pub fn scan(
@@ -343,7 +363,7 @@ impl Namespace {
         let mut keys = Vec::new();
         let mut count = 0;
 
-        for result in self.tree.iter_kv(start_after) {
+        for result in self.tree.read().unwrap().iter_kv(start_after) {
             match result {
                 Ok((key, _)) => {
                     keys.push(key);
