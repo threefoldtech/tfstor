@@ -1038,4 +1038,176 @@ mod test_config {
             );
         }
     }
+
+    #[test]
+    fn test_flush_command() {
+        // Create a server with admin password for namespace operations
+        let server = TestServer::new_with_admin(Some("adminpass".to_string()));
+        let mut conn = server.connect();
+
+        // Create a private namespace
+        let ns_name = "flush_test_ns";
+
+        // Create the namespace (requires admin auth)
+        let _: () = redis::cmd("AUTH")
+            .arg("adminpass")
+            .query(&mut conn)
+            .expect("Failed to authenticate as admin");
+
+        // Create the namespace
+        let _: String = redis::cmd("NSNEW")
+            .arg(ns_name)
+            .query(&mut conn)
+            .expect("Failed to create namespace");
+
+        // Set password for the namespace
+        let ns_password = "nspass";
+        let _: String = redis::cmd("NSSET")
+            .arg(ns_name)
+            .arg("password")
+            .arg(ns_password)
+            .query(&mut conn)
+            .expect("Failed to set namespace password");
+
+        // Set namespace to private (public=0)
+        let _: String = redis::cmd("NSSET")
+            .arg(ns_name)
+            .arg("public")
+            .arg("0")
+            .query(&mut conn)
+            .expect("Failed to set namespace to private");
+
+        // Switch to the new namespace and authenticate
+        let _: () = redis::cmd("SELECT")
+            .arg(ns_name)
+            .arg(ns_password)
+            .query(&mut conn)
+            .expect("Failed to select namespace");
+
+        // Add some test keys
+        let num_keys = 5;
+        for i in 0..num_keys {
+            let key = format!("key_{}", i);
+            let value = format!("value_{}", i);
+            let _: String = redis::cmd("SET")
+                .arg(&key)
+                .arg(&value)
+                .query(&mut conn)
+                .expect("Failed to set key");
+        }
+
+        // Verify keys exist
+        for i in 0..num_keys {
+            let key = format!("key_{}", i);
+            let exists: bool = redis::cmd("EXISTS")
+                .arg(&key)
+                .query(&mut conn)
+                .expect("Failed to check if key exists");
+            assert!(exists, "Key should exist before flush");
+        }
+
+        // Flush the namespace
+        let flush_result: String = redis::cmd("FLUSH")
+            .query(&mut conn)
+            .expect("Failed to flush namespace");
+        assert_eq!(flush_result, "OK", "FLUSH command should return OK");
+
+        // Verify all keys are gone
+        for i in 0..num_keys {
+            let key = format!("key_{}", i);
+            let exists: bool = redis::cmd("EXISTS")
+                .arg(&key)
+                .query(&mut conn)
+                .expect("Failed to check if key exists after flush");
+            assert!(!exists, "Key should not exist after flush");
+        }
+
+        // Verify namespace properties are preserved
+        let _: () = redis::cmd("SELECT")
+            .arg("default")
+            .query(&mut conn)
+            .expect("Failed to select default namespace");
+
+        // Use NSINFO to verify namespace properties
+        let nsinfo_result: String = redis::cmd("NSINFO")
+            .arg(ns_name)
+            .query(&mut conn)
+            .expect("Failed to get namespace info after flush");
+
+        // Check that the namespace is still private (public=0)
+        assert!(
+            nsinfo_result.contains("public: no"),
+            "Namespace should still be private after flush"
+        );
+        // Check that the namespace still has a password
+        assert!(
+            nsinfo_result.contains("password: yes"),
+            "Namespace should still have a password after flush"
+        );
+
+        // Test that we can add new keys after flush
+        let _: () = redis::cmd("SELECT")
+            .arg(ns_name)
+            .arg(ns_password)
+            .query(&mut conn)
+            .expect("Failed to select namespace");
+
+        let new_key = "new_key_after_flush";
+        let new_value = "new_value_after_flush";
+        let set_result: String = redis::cmd("SET")
+            .arg(new_key)
+            .arg(new_value)
+            .query(&mut conn)
+            .expect("Failed to set key after flush");
+        assert_eq!(set_result, "OK", "Should be able to set key after flush");
+
+        // Test that we can't flush the default namespace
+        let _: () = redis::cmd("SELECT")
+            .arg("default")
+            .query(&mut conn)
+            .expect("Failed to select default namespace");
+
+        let flush_default_result: redis::RedisResult<String> = redis::cmd("FLUSH").query(&mut conn);
+        assert!(
+            flush_default_result.is_err(),
+            "Should not be able to flush default namespace"
+        );
+
+        // Test that we can't flush a public namespace
+        let public_ns = "public_flush_test";
+        let _: String = redis::cmd("NSNEW")
+            .arg(public_ns)
+            .query(&mut conn)
+            .expect("Failed to create public namespace");
+
+        // Public namespaces have public=1 by default
+
+        let _: () = redis::cmd("SELECT")
+            .arg(public_ns)
+            .query(&mut conn)
+            .expect("Failed to select public namespace");
+
+        // Try to flush public namespace (should fail)
+        let flush_public_result: redis::RedisResult<String> = redis::cmd("FLUSH").query(&mut conn);
+        assert!(
+            flush_public_result.is_err(),
+            "Should not be able to flush public namespace"
+        );
+
+        // Test that authentication is required for flush
+        // Create a new connection without authentication
+        let mut new_conn = server.connect();
+        let _: () = redis::cmd("SELECT")
+            .arg(ns_name)
+            .query(&mut new_conn)
+            .expect("Failed to select namespace");
+
+        // Try to flush without authentication (should fail)
+        let flush_no_auth_result: redis::RedisResult<String> =
+            redis::cmd("FLUSH").query(&mut new_conn);
+        assert!(
+            flush_no_auth_result.is_err(),
+            "Should not be able to flush without authentication"
+        );
+    }
 }
