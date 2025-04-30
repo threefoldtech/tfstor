@@ -78,6 +78,7 @@ pub enum Command {
         value: String,
     },
     Flush,
+    Time,
     // Add more commands as needed
 }
 
@@ -430,6 +431,12 @@ impl Command {
                         }
                         Ok(Command::Flush)
                     }
+                    "TIME" => {
+                        if array.len() != 1 {
+                            return Err(CommandError::WrongNumberOfArguments("TIME".to_string()));
+                        }
+                        Ok(Command::Time)
+                    }
                     _ => Err(CommandError::UnknownCommand(command_name)),
                 }
             }
@@ -512,6 +519,7 @@ impl CommandHandler {
             Command::Flush => self.handle_flush().await,
             Command::DBSize => self.handle_dbsize(),
             Command::Scan { cursor } => self.handle_scan(cursor).await,
+            Command::Time => self.handle_time(),
             Command::Select { .. } => {
                 // SELECT is handled at a higher level in the connection handler
                 Frame::Error("ERR SELECT should be handled at connection level".into())
@@ -929,6 +937,38 @@ impl CommandHandler {
             Err(e) => {
                 error!("Error flushing namespace: {}", e);
                 Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle TIME command - returns the current server time as a two-element array: [seconds, microseconds]
+    /// This is fully compatible with Redis TIME command
+    fn handle_time(&self) -> Frame {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        debug!("Handling TIME command");
+
+        // Get the current system time
+        let now = SystemTime::now();
+
+        // Convert to duration since UNIX epoch
+        match now.duration_since(UNIX_EPOCH) {
+            Ok(duration) => {
+                // Extract seconds and microseconds
+                let seconds = duration.as_secs();
+                let microseconds = duration.subsec_micros();
+
+                // Create response array with two elements: [seconds, microseconds]
+                let response = vec![
+                    Frame::BulkString(seconds.to_string().into_bytes()),
+                    Frame::BulkString(microseconds.to_string().into_bytes()),
+                ];
+
+                Frame::Array(response)
+            }
+            Err(_) => {
+                // This should never happen unless the system clock is set before UNIX epoch
+                Frame::Error("ERR Failed to get system time".into())
             }
         }
     }
