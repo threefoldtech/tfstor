@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::{
-    BaseMetaTree, Durability, KeyValuePairs, MetaError, MetaTreeExt, Object, Store, Transaction,
-    TransactionBackend,
+    BaseMetaTree, Durability, KeyValuePairs, MetaError, MetaTreeExt, Object, ScanDirection, Store,
+    Transaction, TransactionBackend,
 };
 
 #[derive(Clone)]
@@ -243,35 +243,67 @@ impl BaseMetaTree for FjallTree {
 }
 
 impl MetaTreeExt for FjallTree {
-    fn iter_kv(&self, start_after: Option<Vec<u8>>) -> KeyValuePairs {
+    fn iter_kv(
+        &self,
+        start_key: Option<Vec<u8>>,
+        direction: Option<ScanDirection>,
+    ) -> KeyValuePairs {
         let partition = self.partition.clone();
         let keyspace = self.keyspace.clone();
-        let mut last_key = start_after;
+        let mut last_key = start_key;
 
         Box::new(std::iter::from_fn(move || {
             let read_tx = keyspace.read_tx();
-            let range = match &last_key {
-                Some(k) => {
-                    let mut next = k.clone();
-                    next.push(0);
-                    next..
-                }
-                None => Vec::new()..,
-            };
+            // We need to handle forward and backward scanning differently
+            // because they use different range types
+            if direction.unwrap_or_default() == ScanDirection::Backward {
+                // Backward scanning
+                let range = match &last_key {
+                    Some(k) => {
+                        // Start before the key
+                        ..k.clone()
+                    }
+                    None => ..Vec::new(), // Start from the end
+                };
 
-            read_tx
-                .range::<Vec<u8>, _>(&partition, range)
-                .next()
-                .map(|res| match res {
-                    Ok((k, v)) => {
-                        last_key = Some(k.to_vec());
-                        Ok((k.to_vec(), v.to_vec()))
+                read_tx
+                    .range::<Vec<u8>, _>(&partition, range)
+                    .next_back()
+                    .map(|res| match res {
+                        Ok((k, v)) => {
+                            last_key = Some(k.to_vec());
+                            Ok((k.to_vec(), v.to_vec()))
+                        }
+                        Err(e) => {
+                            tracing::error!("Error reading key: {}", e);
+                            Err(MetaError::OtherDBError(e.to_string()))
+                        }
+                    })
+            } else {
+                // Forward scanning
+                let range = match &last_key {
+                    Some(k) => {
+                        let mut next = k.clone();
+                        next.push(0);
+                        next.. // Start after the key
                     }
-                    Err(e) => {
-                        tracing::error!("Error reading key: {}", e);
-                        Err(MetaError::OtherDBError(e.to_string()))
-                    }
-                })
+                    None => Vec::new().., // Start from the beginning
+                };
+
+                read_tx
+                    .range::<Vec<u8>, _>(&partition, range)
+                    .next()
+                    .map(|res| match res {
+                        Ok((k, v)) => {
+                            last_key = Some(k.to_vec());
+                            Ok((k.to_vec(), v.to_vec()))
+                        }
+                        Err(e) => {
+                            tracing::error!("Error reading key: {}", e);
+                            Err(MetaError::OtherDBError(e.to_string()))
+                        }
+                    })
+            }
         }))
     }
 

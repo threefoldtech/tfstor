@@ -865,7 +865,7 @@ impl CommandHandler {
         let start_after = cursor.map(|c| c.into_bytes());
 
         // Use the scan method to get keys starting after the cursor
-        match self.namespace.scan(start_after, 10) {
+        match self.namespace.scan(start_after, 10, None) {
             Ok(keys) => {
                 if keys.is_empty() {
                     // If no keys were found, return 0 as cursor and empty array

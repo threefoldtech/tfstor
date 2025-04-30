@@ -8,7 +8,7 @@ use md5::{Digest, Md5};
 use tracing::debug;
 
 use crate::storage::{Storage, StorageError};
-use metastore::{MetaError, MetaTreeExt, Object, ObjectData};
+use metastore::{MetaError, MetaTreeExt, Object, ObjectData, ScanDirection};
 
 /// Properties for a namespace
 #[derive(Debug, Clone)]
@@ -357,13 +357,14 @@ impl Namespace {
 
     pub fn scan(
         &self,
-        start_after: Option<Vec<u8>>,
+        start_key: Option<Vec<u8>>,
         num_keys: u32,
+        direction: Option<ScanDirection>,
     ) -> Result<Vec<Vec<u8>>, MetaError> {
         let mut keys = Vec::new();
         let mut count = 0;
 
-        for result in self.tree.read().unwrap().iter_kv(start_after) {
+        for result in self.tree.read().unwrap().iter_kv(start_key, direction) {
             match result {
                 Ok((key, _)) => {
                     keys.push(key);

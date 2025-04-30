@@ -3,6 +3,16 @@ use std::str::FromStr;
 
 use super::{object::Object, MetaError, Transaction};
 
+/// Direction for scanning keys in a tree
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScanDirection {
+    /// Scan from lowest key to highest key
+    #[default]
+    Forward,
+    /// Scan from highest key to lowest key
+    Backward,
+}
+
 /// `BaseMetaTree` defines the core operations for a metadata tree storage.
 ///
 /// This trait provides the fundamental operations needed to interact with a key-value
@@ -66,11 +76,16 @@ pub trait MetaTreeExt: BaseMetaTree {
     /// Iterates over all key-value pairs in the tree.
     ///
     /// # Arguments
-    /// * `start_after` - Optional key to start iteration after (exclusive)
+    /// * `start_key` - Optional key to start iteration from (exclusive in forward direction, inclusive in backward direction)
+    /// * `direction` - Optional direction of iteration (forward or backward), defaults to forward
     ///
     /// # Returns
     /// * `KeyValuePairs` - A boxed iterator over all key-value pairs
-    fn iter_kv(&self, start_after: Option<Vec<u8>>) -> KeyValuePairs;
+    fn iter_kv(
+        &self,
+        start_key: Option<Vec<u8>>,
+        direction: Option<ScanDirection>,
+    ) -> KeyValuePairs;
 
     /// Filters and iterates over a range of keys with optional filtering parameters.
     ///
