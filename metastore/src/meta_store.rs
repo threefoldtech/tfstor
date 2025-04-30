@@ -179,7 +179,7 @@ impl MetaStore {
     pub fn list_buckets(&self) -> Result<Vec<BucketMeta>, MetaError> {
         let bucketlist_tree = self.get_bucketlist_tree()?;
         let buckets = bucketlist_tree
-            .iter_kv(None)
+            .iter_kv(None, None)
             .filter_map(|result| {
                 let (_, value) = match result {
                     Ok(kv) => kv,
