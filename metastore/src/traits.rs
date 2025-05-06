@@ -3,16 +3,6 @@ use std::str::FromStr;
 
 use super::{object::Object, MetaError, Transaction};
 
-/// Direction for scanning keys in a tree
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ScanDirection {
-    /// Scan from lowest key to highest key
-    #[default]
-    Forward,
-    /// Scan from highest key to lowest key
-    Backward,
-}
-
 /// `BaseMetaTree` defines the core operations for a metadata tree storage.
 ///
 /// This trait provides the fundamental operations needed to interact with a key-value
