@@ -37,6 +37,7 @@ By default, respd listens on `127.0.0.1:6379` and can be accessed using any Redi
 | NSSET <n> <prop> <val> | Set a property for a namespace (admin only) | `NSSET mynamespace worm 1`         |
 | DBSIZE           | Get the number of keys in the current namespace (approximate) | `DBSIZE`                          |
 | SCAN [cursor]     | Incrementally iterate over keys in the current namespace | `SCAN 0` or `SCAN mycursor`        |
+| RSCAN [cursor]    | Incrementally iterate over keys in backward direction | `RSCAN 0` or `RSCAN mycursor`      |
 
 - All commands are case-insensitive.
 - Namespace commands (`SELECT`, `NSNEW`, `NSINFO`, `NSLIST`) allow multi-tenant data separation.

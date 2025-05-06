@@ -378,4 +378,28 @@ impl Namespace {
 
         Ok(keys)
     }
+
+    pub fn scan_backward(
+        &self,
+        start_key: Option<Vec<u8>>,
+        num_keys: u32,
+    ) -> Result<Vec<Vec<u8>>, MetaError> {
+        let mut keys = Vec::new();
+        let mut count = 0;
+
+        for result in self.tree.read().unwrap().iter_kv_backward(start_key) {
+            match result {
+                Ok((key, _)) => {
+                    keys.push(key);
+                    count += 1;
+                    if count >= num_keys {
+                        break;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(keys)
+    }
 }
