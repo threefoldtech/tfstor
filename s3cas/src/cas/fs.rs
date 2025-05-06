@@ -255,7 +255,7 @@ impl CasFS {
 
         // removes all objects in the bucket
         let bucket = self.meta_store.get_bucket_ext(bucket_name)?;
-        for key_val in bucket.iter_kv(None, None) {
+        for key_val in bucket.iter_kv(None) {
             let (key, _) = key_val?;
             self.delete_object(
                 bucket_name,

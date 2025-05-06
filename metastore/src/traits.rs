@@ -76,16 +76,20 @@ pub trait MetaTreeExt: BaseMetaTree {
     /// Iterates over all key-value pairs in the tree.
     ///
     /// # Arguments
-    /// * `start_key` - Optional key to start iteration from (exclusive in forward direction, inclusive in backward direction)
-    /// * `direction` - Optional direction of iteration (forward or backward), defaults to forward
+    /// * `start_after` - The key to start scanning from. If None, starts from the beginning.
     ///
     /// # Returns
     /// * `KeyValuePairs` - A boxed iterator over all key-value pairs
-    fn iter_kv(
-        &self,
-        start_key: Option<Vec<u8>>,
-        direction: Option<ScanDirection>,
-    ) -> KeyValuePairs;
+    fn iter_kv(&self, start_after: Option<Vec<u8>>) -> KeyValuePairs;
+
+    /// Iterates over all key-value pairs in the tree in backward direction.
+    ///
+    /// # Arguments
+    /// * `start_key` - Optional key to start iteration from (inclusive in backward direction)
+    ///
+    /// # Returns
+    /// * `KeyValuePairs` - A boxed iterator over all key-value pairs in backward order
+    fn iter_kv_backward(&self, start_key: Option<Vec<u8>>) -> KeyValuePairs;
 
     /// Filters and iterates over a range of keys with optional filtering parameters.
     ///
