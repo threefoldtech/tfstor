@@ -72,6 +72,9 @@ pub enum Command {
     Scan {
         cursor: Option<String>,
     },
+    RScan {
+        cursor: Option<String>,
+    },
     NSSet {
         namespace: String,
         property: String,
@@ -425,6 +428,33 @@ impl Command {
 
                         Ok(Command::Scan { cursor })
                     }
+                    "RSCAN" => {
+                        if array.len() > 2 {
+                            return Err(CommandError::WrongNumberOfArguments("RSCAN".to_string()));
+                        }
+
+                        let cursor = if array.len() == 2 {
+                            match &array[1] {
+                                Frame::BulkString(bytes) => {
+                                    let cursor_str = String::from_utf8_lossy(bytes).to_string();
+                                    if cursor_str == "0" {
+                                        None
+                                    } else {
+                                        Some(cursor_str)
+                                    }
+                                }
+                                _ => {
+                                    return Err(CommandError::Protocol(
+                                        "RSCAN cursor must be a bulk string".to_string(),
+                                    ))
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        Ok(Command::RScan { cursor })
+                    }
                     "FLUSH" => {
                         if array.len() != 1 {
                             return Err(CommandError::WrongNumberOfArguments("FLUSH".to_string()));
@@ -495,7 +525,6 @@ impl CommandHandler {
         self.namespace_authenticated = authenticated;
         debug!("Set namespace authentication status to {}", authenticated);
     }
-
     /// Execute a command and return the response frame
     pub async fn execute(&self, cmd: Command) -> Frame {
         match cmd {
@@ -511,14 +540,15 @@ impl CommandHandler {
             Command::NSNew { name } => self.handle_nsnew(name).await,
             Command::NSInfo { name } => self.handle_nsinfo(name).await,
             Command::NSList => self.handle_nslist().await,
+            Command::DBSize => self.handle_dbsize(),
+            Command::Scan { cursor } => self.handle_scan(cursor).await,
+            Command::RScan { cursor } => self.handle_rscan(cursor).await,
             Command::NSSet {
                 namespace,
                 property,
                 value,
             } => self.handle_nsset(namespace, property, value).await,
             Command::Flush => self.handle_flush().await,
-            Command::DBSize => self.handle_dbsize(),
-            Command::Scan { cursor } => self.handle_scan(cursor).await,
             Command::Time => self.handle_time(),
             Command::Select { .. } => {
                 // SELECT is handled at a higher level in the connection handler
@@ -866,6 +896,49 @@ impl CommandHandler {
 
         // Use the scan method to get keys starting after the cursor
         match self.namespace.scan(start_after, 10) {
+            Ok(keys) => {
+                if keys.is_empty() {
+                    // If no keys were found, return 0 as cursor and empty array
+                    let response = vec![Frame::BulkString("0".into()), Frame::Array(vec![])];
+                    Frame::Array(response)
+                } else {
+                    // Determine the next cursor
+                    // If we got fewer than 10 keys, we've reached the end
+                    let next_cursor = if keys.len() < 10 {
+                        "0".to_string()
+                    } else {
+                        // Otherwise, use the last key as the next cursor
+                        let last_key = keys.last().unwrap();
+                        String::from_utf8_lossy(last_key).to_string()
+                    };
+
+                    // Convert keys to frames
+                    let key_frames: Vec<Frame> = keys.into_iter().map(Frame::BulkString).collect();
+
+                    // Return [cursor, [keys...]]
+                    let response = vec![
+                        Frame::BulkString(next_cursor.into_bytes()),
+                        Frame::Array(key_frames),
+                    ];
+                    Frame::Array(response)
+                }
+            }
+            Err(e) => {
+                error!("Error scanning keys: {}", e);
+                Frame::Error(format!("ERR {}", e))
+            }
+        }
+    }
+
+    /// Handle RSCAN command - scan keys in the current namespace in backward direction
+    async fn handle_rscan(&self, cursor: Option<String>) -> Frame {
+        debug!("Handling RSCAN command with cursor: {:?}", cursor);
+
+        // Convert the cursor from String to Vec<u8> if it exists
+        let start_after = cursor.map(|c| c.into_bytes());
+
+        // Use the scan_backward method to get keys starting before the cursor
+        match self.namespace.scan_backward(start_after, 10) {
             Ok(keys) => {
                 if keys.is_empty() {
                     // If no keys were found, return 0 as cursor and empty array
