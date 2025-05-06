@@ -359,12 +359,12 @@ impl Namespace {
         &self,
         start_key: Option<Vec<u8>>,
         num_keys: u32,
-        direction: Option<ScanDirection>,
+        _direction: Option<ScanDirection>,
     ) -> Result<Vec<Vec<u8>>, MetaError> {
         let mut keys = Vec::new();
         let mut count = 0;
 
-        for result in self.tree.read().unwrap().iter_kv(start_key, direction) {
+        for result in self.tree.read().unwrap().iter_kv(start_key) {
             match result {
                 Ok((key, _)) => {
                     keys.push(key);
