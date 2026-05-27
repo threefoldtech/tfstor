@@ -32,7 +32,7 @@ This repository is owned and maintained by TF-Tech NV, a Belgian company respons
 To build the project, use the standard Rust tools:
 
 ```bash
-git clone https://github.com/threefoldtech/tfstor
+git clone https://github.com/threefoldtech/qss_storage
 cd qss_storage
 
 # Build all components
