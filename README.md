@@ -33,7 +33,7 @@ To build the project, use the standard Rust tools:
 
 ```bash
 git clone https://github.com/threefoldtech/tfstor
-cd tfstor
+cd qss_storage
 
 # Build all components
 cargo build --release
