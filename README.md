@@ -1,9 +1,31 @@
 # TFStor
 
-This project provides storage solutions using content-addressed storage:
+Distributed and resilient object and block storage services. TFStor aggregates storage capacity from nodes into a unified pool accessible through standard protocols, ensuring data redundancy and availability across a decentralized node network.
 
-1. **[s3cas](./s3cas/README.md)** - An S3-compatible API server using content-addressed storage. [Read more about s3cas →](./s3cas/README.md)
-2. **[respd](./respd/README.md)** - A Redis-compatible server using metastore as backend. [Read more about respd →](./respd/README.md)
+## What this is
+
+TFStor is a storage subsystem that provides content-addressed storage backends exposed through familiar APIs. It is designed to run on decentralized infrastructure where storage is contributed by individual nodes and made available as a coherent service layer. The system focuses on efficiency, deduplication, and protocol compatibility.
+
+## What this repository contains
+
+1. **[s3cas](./s3cas/README.md)** — An S3-compatible API server using content-addressed storage. [Read more about s3cas →](./s3cas/README.md)
+2. **[respd](./respd/README.md)** — A Redis-compatible server using metastore as backend. [Read more about respd →](./respd/README.md)
+
+## Role in the stack
+
+TFStor operates as the storage layer, sitting below the application and virtualization stacks. It provides persistent object and key-value storage to workloads running on grid nodes. The S3-compatible server allows existing applications to use standard S3 clients, while the Redis-compatible server offers a fast key-value interface for caching and session storage. TFStor is designed to work alongside the node operating system and network layers to provide reliable storage without centralized dependencies.
+
+## ZOS / Zero-OS
+
+ZOS, also known as Zero-OS, is the operating system layer used to run and manage nodes. It provides the low-level runtime environment for workloads, networking, storage, and automation. TFStor storage services are deployed on nodes running ZOS and integrate with its resource management and isolation mechanisms.
+
+## Relation to ThreeFold
+
+This technology is used within the ThreeFold ecosystem and was first deployed on the ThreeFold Grid. The component itself is designed as reusable infrastructure technology and should be understood by its technical function first, independent of any specific deployment.
+
+## Ownership
+
+This repository is owned and maintained by TF-Tech NV, a Belgian company responsible for the development and maintenance of this technology.
 
 ## Building
 
@@ -20,6 +42,7 @@ cargo build --release
 cargo build --release -p s3cas
 cargo build --release -p respd
 ```
+
 With this feature, the data blocks will be deleted when they aren't used anymore.
 
 ## respd Features
@@ -38,4 +61,4 @@ The respd server implements some basic Redis commands and also provides addition
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-Copyright (c) TFTech NV.
+Copyright (c) TF-Tech NV.
